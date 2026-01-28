@@ -1,6 +1,7 @@
 import pandas as pd
 import time
 import shutil
+import re
 from pathlib import Path
 from typing import Dict, Any, List, Union
 from tqdm import tqdm
@@ -138,12 +139,21 @@ class DataProcessor:
                 if col in base_row:
                     del base_row[col]
 
+            # Clean title for filename usage (keep alphanumeric + spaces, limit len)
+            clean_title = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
+            clean_title = clean_title[:50]
+            paper_id = f"{index+1:03d}_{clean_title}"
+
             # Execute all strategies in parallel for this paper
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_strategy = {
-                    executor.submit(strategy_obj.process, title, abstract): name
-                    for name, strategy_obj in self.strategies.items()
-                }
+                # Prepare tasks with specific session paths
+                future_to_strategy = {}
+                for name, strategy_obj in self.strategies.items():
+                    # Construct semantic session path: history/sessions/{task_name}/{paper_id}/{strategy}.json
+                    session_path = self.config.SESSIONS_DIR / task_name / paper_id / f"{name}.json"
+                    
+                    future = executor.submit(strategy_obj.process, title, abstract, session_path)
+                    future_to_strategy[future] = name
                 
                 for future in as_completed(future_to_strategy):
                     name = future_to_strategy[future]

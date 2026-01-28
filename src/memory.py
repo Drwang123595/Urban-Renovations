@@ -1,29 +1,41 @@
 import json
 import uuid
 import time
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from pathlib import Path
 from .config import Config
 
 class ConversationMemory:
-    def __init__(self, system_prompt: Optional[str] = None, session_id: Optional[str] = None):
+    def __init__(self, system_prompt: Optional[str] = None, session_id: Optional[str] = None, 
+                 session_path: Optional[Union[str, Path]] = None, skip_index: bool = False):
         """
         Initialize the memory with an optional system prompt and session ID.
+        If session_path is provided, it overrides the default UUID-based path.
         If session_id is provided, tries to load existing history.
         """
         self.session_id = session_id or str(uuid.uuid4())
         self.messages: List[Dict[str, str]] = []
         self.created_at = time.time()
         self.warning_triggered = False
+        self.skip_index = skip_index
         
-        # Try load if session_id existed, otherwise init
-        if session_id and self._session_file_path.exists():
+        if session_path:
+            self.session_path = Path(session_path)
+            # Ensure parent dir exists
+            self.session_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            self.session_path = None
+        
+        # Try load if session_id existed (and we are using default path) or if explicit path exists
+        if self._session_file_path.exists():
             self.load()
         elif system_prompt:
             self.add_system_message(system_prompt)
             
     @property
     def _session_file_path(self) -> Path:
+        if self.session_path:
+            return self.session_path
         return Config.SESSIONS_DIR / f"{self.session_id}.json"
 
     def add_system_message(self, content: str):
@@ -58,8 +70,9 @@ class ConversationMemory:
         with open(self._session_file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             
-        # Update index (optional, can be optimized to not run every save)
-        self._update_index()
+        # Update index only if not skipped
+        if not self.skip_index:
+            self._update_index()
 
     def load(self):
         """Load conversation from JSON file."""

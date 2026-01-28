@@ -1,11 +1,18 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Union
+from pathlib import Path
 from .base import ExtractionStrategy
 from ..memory import ConversationMemory
 
 class ReflectionStrategy(ExtractionStrategy):
-    def process(self, title: str, abstract: str) -> Dict[str, Any]:
+    def process(self, title: str, abstract: str, session_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
         # Independent memory per paper
-        memory = ConversationMemory(self.prompt_gen.get_reflection_system_prompt())
+        skip_index = True if session_path else False
+        
+        memory = ConversationMemory(
+            self.prompt_gen.get_reflection_system_prompt(),
+            session_path=session_path,
+            skip_index=skip_index
+        )
         
         # Round 1: Initial Answer
         prompt = self.prompt_gen.get_single_prompt(title, abstract)

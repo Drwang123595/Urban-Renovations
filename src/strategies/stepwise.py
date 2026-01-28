@@ -1,11 +1,19 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Union
+from pathlib import Path
 from .base import ExtractionStrategy
 from ..memory import ConversationMemory
 
 class StepwiseStrategy(ExtractionStrategy):
-    def process(self, title: str, abstract: str) -> Dict[str, Any]:
+    def process(self, title: str, abstract: str, session_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
         # Initialize memory with system prompt
-        memory = ConversationMemory(self.prompt_gen.get_step_system_prompt())
+        skip_index = True if session_path else False
+        
+        memory = ConversationMemory(
+            self.prompt_gen.get_step_system_prompt(),
+            session_path=session_path,
+            skip_index=skip_index
+        )
+        
         results: Dict[str, Any] = {}
 
         # Step 1: Include context (Title + Abstract)

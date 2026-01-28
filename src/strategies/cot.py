@@ -1,13 +1,21 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Union
 import re
+from pathlib import Path
 from .base import ExtractionStrategy
 from ..memory import ConversationMemory
 
 class CoTStrategy(ExtractionStrategy):
-    def process(self, title: str, abstract: str) -> Dict[str, Any]:
+    def process(self, title: str, abstract: str, session_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
         # CoT can use a fresh memory per paper (like Single) or long context.
         # Here we stick to independent processing for cleaner experimental isolation.
-        memory = ConversationMemory(self.prompt_gen.get_cot_system_prompt())
+        
+        skip_index = True if session_path else False
+        
+        memory = ConversationMemory(
+            self.prompt_gen.get_cot_system_prompt(),
+            session_path=session_path,
+            skip_index=skip_index
+        )
         
         prompt = self.prompt_gen.get_single_prompt(title, abstract)
         memory.add_user_message(prompt)

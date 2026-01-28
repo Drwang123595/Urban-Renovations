@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
+from pathlib import Path
 from ..llm_client import DeepSeekClient
 from ..prompts import PromptGenerator
 from ..memory import ConversationMemory
@@ -11,13 +12,18 @@ class ExtractionStrategy(ABC):
         self.memory: Optional[ConversationMemory] = None
 
     @abstractmethod
-    def process(self, title: str, abstract: str) -> Dict[str, Any]:
+    def process(self, title: str, abstract: str, session_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
         """
         Process a single paper and return extracted data.
+        
+        Args:
+            title: Paper title
+            abstract: Paper abstract
+            session_path: Optional path to save conversation history (for semantic naming)
         """
         pass
 
-    def _get_or_create_memory(self, system_prompt: str) -> ConversationMemory:
+    def _get_or_create_memory(self, system_prompt: str, session_path: Optional[Union[str, Path]] = None) -> ConversationMemory:
         """
         Get existing memory or create new one if full/missing.
         Handles session rotation for long contexts.
@@ -29,8 +35,15 @@ class ExtractionStrategy(ABC):
 
         if self.memory is None:
             # Create new memory
-            self.memory = ConversationMemory(system_prompt=system_prompt)
-            print(f"\n[INFO] Created new session: {self.memory.session_id}")
+            # If session_path is provided, we skip global index update to prevent concurrency issues
+            skip_index = True if session_path else False
+            self.memory = ConversationMemory(
+                system_prompt=system_prompt, 
+                session_path=session_path,
+                skip_index=skip_index
+            )
+            if not session_path:
+                print(f"\n[INFO] Created new session: {self.memory.session_id}")
             
         return self.memory
 
