@@ -1,0 +1,12 @@
+# CoT Strategy Prompts
+cot_instruction: |
+  OUTPUT REQUIREMENTS:
+  1. First, provide a concise Chain of Thought reasoning process enclosed in <thinking> tags. Analyze the paper against the "Urban renewal" and "Spatial" definitions step by step.
+  2. Then, output EXACTLY one line with 4 fields (TAB-separated) as the final result.
+  
+  Example Format:
+  <thinking>
+  The title mentions "urban regeneration", which is a synonym. The abstract discusses upgrading existing housing. P score is likely > 0.6.
+  The abstract mentions "London", so it is spatial. Level is City.
+  </thinking>
+  1	1	City	United Kingdom-England-London

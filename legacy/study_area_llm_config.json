@@ -1,0 +1,21 @@
+{
+  "input_xlsx": "data/raw/V3.0.xlsx",
+  "sheet_name": "清理汇总后数据",
+  "output_csv": "data/processed/study_area_extracted.csv",
+  "output_xlsx": "data/processed/study_area_extracted.xlsx",
+  "primary_model": {},
+  "fallback_model": {},
+  "disable_fallback": false,
+  "max_rows": null,
+  "max_workers": 2,
+  "resume": true,
+  "conf_threshold": 0.75,
+  "max_tokens": 450,
+  "temperature": 0.1,
+  "fallback_temperature": 0.1,
+  "timeout_s": 120,
+  "max_retries": 3,
+  "base_sleep_s": 1.0,
+  "dry_run": false,
+  "dry_run_requests_jsonl": "data/processed/study_area_requests.jsonl"
+}

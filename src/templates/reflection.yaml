@@ -1,0 +1,10 @@
+# Reflection Strategy Prompts
+reflection_critique: |
+  Please review your previous answer carefully.
+  1. Did you strictly follow the definition of "Urban Renewal"? (Must target EXISTING built-up areas, not new development)
+  2. Did you correctly identify the spatial level?
+  
+  If your previous answer was correct, output it again exactly.
+  If it was wrong, correct it.
+  
+  Output ONLY the final 4-field TAB-separated line. No extra text.

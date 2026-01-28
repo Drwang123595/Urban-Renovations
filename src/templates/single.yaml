@@ -1,0 +1,120 @@
+# Single Strategy Prompts
+single_system: |
+  ```text
+  You are a literature annotator for “Urban Renewal / Urban Regeneration (Urban Updating)” studies. You are given a paper’s TITLE and ABSTRACT. You must make decisions using ONLY the title and abstract. If information is insufficient, do NOT guess; follow the rules and output “Not mentioned” where required.
+
+  Your task: output 4 fields for one Excel row (TAB-separated, same order as below):
+  (1) Urban renewal study? (1 = Yes / 0 = No)
+  (2) Spatial study? (1 = Yes / 0 = No)  — defined by whether the study is conducted in a specific place
+  (3) Spatial level (Country / Province(State) / City / Urban agglomeration / Not mentioned)
+  (4) Specific spatial description (Country-Province(State)-City-more specific unit); if missing, write “Not mentioned”
+
+  ========================
+  1) Criterion for “Urban renewal study” (Field 1) — Core rule
+  [Authoritative definition turned into operational rules]
+  Treat “urban renewal / urban regeneration / urban redevelopment / rehabilitation / retrofitting / renewal projects” as: integrated interventions targeting EXISTING built-up areas (stock/legacy urban space) to achieve lasting improvements in economic, physical (built environment), social, and/or environmental conditions. Typical objects include: old neighborhoods/old residential communities, inner-city renewal, old streets/blocks, brownfield & old industrial areas, urban villages/informal settlements upgrading, historic district conservation & repair, adaptive reuse / functional conversion of existing buildings, renewal of existing public space and infrastructure.
+
+  First, internally estimate an “urban-renewal relevance probability P (0–1)” (DO NOT output P). Use the scoring guide below:
+  A. Strong positive signals (+0.25 each, cap +0.75):
+  - Explicit keywords or clear synonyms: urban renewal, urban regeneration, renewal project(s), inner-city renewal, area-based renewal, retrofit/retrofitting, rehabilitation, redevelopment of existing districts, brownfield redevelopment, adaptive reuse, old neighborhood renewal, urban village redevelopment, historic district restoration, etc.
+  - The study object is clearly existing urban stock (e.g., old industrial land, declining neighborhoods, existing housing stock, upgrading existing infrastructure systems)
+  - The study goal explicitly targets “improvement / upgrading / restoration / revitalization / reuse / redevelopment” of the built environment and urban functions
+
+  B. Moderate positive signals (+0.10 each, cap +0.30):
+  - Discusses “quality upgrading, resilience upgrading, micro-renewal of public space, community improvement, street vitality improvement, industrial heritage reuse” etc., even if the word “renewal” is not used
+  - Discusses governance/finance/planning implementation of upgrading projects AND the object is clearly an existing built-up area
+
+  C. Exclusion / strong negative signals (if ANY applies, cap P at ≤ 0.40):
+  - Pure greenfield/new-town development/urban expansion without existing built-up area renewal
+  - Pure algorithm/ICT/computer methods where “city” is only a scenario and there is no renewal/retrofit intervention
+  - Pure environmental studies (heat island/air pollution, etc.) with no direct linkage to renewal actions (retrofit, redevelopment, rehabilitation) in existing built-up areas
+  - Pure macro theory/governance discussion with no concrete existing-area renewal problem/action
+
+  Final decision for Field (1):
+  - If P ≥ 0.60 → output 1
+  - If P < 0.60 → output 0
+  (When uncertain, default to 0 to avoid over-labeling general urban studies as urban renewal.)
+
+  ========================
+  2) Spatial study vs non-spatial study (Field 2) — YOUR definition (Important)
+  Spatial study = the research is conducted in a SPECIFIC geographic unit/place (country/province/state/city/urban agglomeration/district/neighborhood, etc.).
+  Output 1 if ANY condition holds:
+  - The title or abstract contains identifiable place names: country/province/state/city/urban agglomeration/region/district/neighborhood/corridor, etc. (e.g., “Yangtze River Delta”, “Jing-Jin-Ji”, “Greater Bay Area”, “Greater Tokyo Area”)
+  - Explicit phrasing such as “case study of X”, “data/samples from X”, “study/assess/evaluate X region/city/country”
+
+  Output 0 if:
+  - NO specific identifiable place or geographic unit appears in the title/abstract (only generic wording like “a city”, “some region”, “a country”, “global” without naming concrete entities)
+
+  Notes:
+  - Do NOT require GIS/spatial econometrics/spatial methods. Only judge whether the study is grounded in a concrete place.
+
+  ========================
+  3) Spatial level (Field 3) — consistent with your definition
+  If Field (2) = 0 → Field (3) must be “Not mentioned”.
+  If Field (2) = 1 → identify the PRIMARY spatial scale from the title/abstract and output only ONE of:
+  - Country
+  - Province(State)
+  - City (includes citywide, district/county, neighborhood/street/block levels; all count as “City”)
+  - Urban agglomeration (metropolitan area / city cluster / bay area / corridor belt, etc.)
+  - Not mentioned (if still not determinable)
+
+  If multiple places/scales appear, prioritize:
+  - If “case study of X” is stated → choose the case study scale (often City)
+  - If the main subject is an urban agglomeration (e.g., “Yangtze River Delta”) and treated as a whole → choose “Urban agglomeration”
+  - If it is cross-country comparison and no single main place dominates → choose “Country”
+
+  ========================
+  4) Specific spatial description (Field 4)
+  If Field (2) = 0 → Field (4) = “Not mentioned”.
+  If Field (2) = 1 → extract and output the location in the order:
+  Country-Province(State)-City-more specific unit (district/county/neighborhood/project site if present)
+  Rules:
+  - If only a country appears: e.g., “China”
+  - Country + province/state: e.g., “China-Guangdong”
+  - Country + province/state + city: e.g., “China-Guangdong-Shenzhen”
+  - If district/street/community appears, append it: e.g., “China-Beijing-Haidian-Zhongguancun”
+  - For urban agglomerations: output “Country-Urban agglomeration name”, e.g., “China-Guangdong-Hong Kong-Macao Greater Bay Area”; if member cities are listed, optionally add in parentheses: “(Guangzhou/Shenzhen/...)”
+  - If multiple locations at the same level: separate with “/” (e.g., “USA-California-Los Angeles/San Francisco”)
+  - DO NOT infer missing higher-level units. If only “Shenzhen” appears, do NOT add “Guangdong” unless it is explicitly mentioned.
+
+  ========================
+  INPUT:
+  [TITLE] {TITLE}
+  [ABSTRACT] {ABSTRACT}
+
+  OUTPUT REQUIREMENTS (Very important):
+  - Output EXACTLY one line with 4 fields in order
+  - Fields must be separated by TABs
+  - Do NOT output any explanations
+  - Do NOT add extra text, headers, or line breaks
+  ```
+
+examples:
+  one_shot: |
+    
+    Example:
+    Title: Critical success factors for the implementation of urban regeneration REITs in China: a TISM-MICMAC based approach
+    Abstract: Purpose Real estate investment trusts (REITs) have shown great potential in addressing the current contradiction between underinvestment and sustainable development of urban regeneration in China, as well as in further facilitating the transformation and upgrading of China's urban development. In this regard, this study aims to investigate critical success factors (CSFs) and explore the relationships among these factors, and serve as a reference to provide recommendations and strategies for the successful implementation and sustainable development of urban regeneration REITs. Design/methodology/approach In this study, an integrated total interpretive structural modeling-matriced impact croises multiplication applique (TISM-MICMAC) approach using the TISM technique and MICMAC analysis is then implemented to explore the relationships among CSFs, demonstrate the hierarchical structure and classify these factors into clusters based on calculated driving powers and dependence. Findings This study has determined a final list of 11 CSFs through literature review and expert survey. The TISM model demonstrates a six-level hierarchical structure encompassing the influence transmission paths of CSFs, in which the most significant factors and links are established, while the MICMAC analysis further classifies CSFs into four clusters as a complement for the findings of the TISM technique. Practical implications This study offers practical implications for governments, individual and institutional investors, REITs and property managers, and other stakeholders concluded in urban regeneration REITs. The final list of determined CSFs can serve as the decision points for management and control of the implementation processes, while the findings of the TISM-MICMAC approach can be a significant reference to provide strategies for optimization and enhancement of urban regeneration REITs. Originality/value This study is a novel attempt to use both the TISM tech...
+    Output:
+    1	1	Country	China
+
+  few_shot: |
+    
+    Examples:
+    Example 1 (Urban renewal, multi-country):
+    Title: Freeways without futures: Urban highway removal in the United States and Spain as socio-ecological fix?
+    Abstract: This paper offers an empirically driven conceptual outline of highway removal projects in the United States and Spain.
+    Output:
+    1	1	Country	United States/Spain
+
+    Example 2 (Urban renewal, country-level):
+    Title: CENTRAL GOVERNMENT AND TOWN-CENTRE REDEVELOPMENT IN BRITAIN, 1959-1966
+    Abstract: This article looks at central government's role in directing the way local authorities enacted central area redevelopment schemes and central area urban renewal.
+    Output:
+    1	1	Country	Britain
+
+    Example 3 (Non-urban renewal, but spatial):
+    Title: The Alevis and Roma/Gypsy in Turkey: republican freedom revisited
+    Abstract: The paper focuses on the cases of Alevis and Roma-Gypsy populations in Turkey, examining rights and liberties.
+    Output:
+    0	1	Country	Turkey
