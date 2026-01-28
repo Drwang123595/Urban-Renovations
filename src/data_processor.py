@@ -2,25 +2,34 @@ import pandas as pd
 import time
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config import Config
 from .llm_client import DeepSeekClient
 from .prompts import PromptGenerator
 from .strategies import StrategyRegistry
 
 class DataProcessor:
-    def __init__(self, shot_mode: str = "zero", strategy: str = "single"):
+    def __init__(self, shot_mode: str = "zero", strategies: Union[str, List[str]] = "single"):
         self.config = Config()
         self.client = DeepSeekClient()
         self.prompt_gen = PromptGenerator(shot_mode=shot_mode)
-        self.strategy_name = strategy
         
-        strategy_cls = StrategyRegistry.get_strategy(strategy)
-        if not strategy_cls:
-            raise ValueError(f"Unknown strategy: {strategy}. Available: {StrategyRegistry.list_strategies()}")
+        if isinstance(strategies, str):
+            self.strategy_names = [strategies]
+        else:
+            self.strategy_names = strategies
             
-        self.strategy = strategy_cls(self.client, self.prompt_gen)
+        self.strategies = {}
+        available_strategies = StrategyRegistry.list_strategies()
+        
+        for name in self.strategy_names:
+            strategy_cls = StrategyRegistry.get_strategy(name)
+            if not strategy_cls:
+                raise ValueError(f"Unknown strategy: {name}. Available: {available_strategies}")
+            # Instantiate each strategy separately
+            self.strategies[name] = strategy_cls(self.client, self.prompt_gen)
         
     def run_batch(self, input_file: str = None, output_file: str = None, limit: int = None):
         """
@@ -48,13 +57,27 @@ class DataProcessor:
         else:
             print(f"Labels file already exists at: {label_file_path}")
 
-        if not output_file:
-            # Structure: Data/{task_name}/output/{strategy}_{shot}_{timestamp}.xlsx
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            filename = f"{self.strategy_name}_{self.prompt_gen.shot_mode}_{timestamp}.xlsx"
-            output_file = output_dir / filename
+        # Prepare output files and result containers for each strategy
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        output_files = {}
+        results_lists = {name: [] for name in self.strategy_names}
+        
+        if output_file:
+            # If user provided a specific output file, we handle it. 
+            # If multiple strategies, we append strategy name.
+            base_output = Path(output_file)
+            if len(self.strategy_names) == 1:
+                output_files[self.strategy_names[0]] = base_output
+            else:
+                for name in self.strategy_names:
+                    # e.g. provided "out.xlsx" -> "out_single.xlsx", "out_cot.xlsx"
+                    new_name = f"{base_output.stem}_{name}{base_output.suffix}"
+                    output_files[name] = base_output.parent / new_name
         else:
-            output_file = Path(output_file)
+            # Default naming: {strategy}_{shot}_{timestamp}.xlsx
+            for name in self.strategy_names:
+                filename = f"{name}_{self.prompt_gen.shot_mode}_{timestamp}.xlsx"
+                output_files[name] = output_dir / filename
             
         print(f"Reading from {input_path}")
         df = pd.read_excel(input_path, engine="openpyxl")
@@ -77,12 +100,10 @@ class DataProcessor:
             df = df.head(limit)
             
         # Ensure output directory exists (in case user provided custom path)
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        results_list = []
+        for f in output_files.values():
+            f.parent.mkdir(parents=True, exist_ok=True)
         
         # Define known label columns to exclude from output
-        # Add any other columns you want to hide from the result file
         exclude_cols = [
             "Label_UrbanRenewal", 
             "Label_Spatial", 
@@ -96,8 +117,13 @@ class DataProcessor:
         ]
         
         print(f"Processing {len(df)} papers with mode='{self.prompt_gen.shot_mode}'...")
+        print(f"Strategies: {self.strategy_names}")
         print(f"Task Workspace: {task_dir}")
-        print(f"Output will be saved to: {output_file}")
+        for name, path in output_files.items():
+            print(f"Output for {name}: {path}")
+            
+        # Parallel Execution Logic
+        max_workers = len(self.strategy_names)
         
         for index, row in tqdm(df.iterrows(), total=len(df)):
             title = str(row.get("Article Title", "") or "")
@@ -106,21 +132,36 @@ class DataProcessor:
             if not title and not abstract:
                 continue
                 
-            extracted = self.strategy.process(title, abstract)
-            
-            # Update row data
             # Clean row: remove label columns before adding new results
-            res_row = row.to_dict()
+            base_row = row.to_dict()
             for col in exclude_cols:
-                if col in res_row:
-                    del res_row[col]
-            
-            res_row.update(extracted)
-            results_list.append(res_row)
+                if col in base_row:
+                    del base_row[col]
+
+            # Execute all strategies in parallel for this paper
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_strategy = {
+                    executor.submit(strategy_obj.process, title, abstract): name
+                    for name, strategy_obj in self.strategies.items()
+                }
+                
+                for future in as_completed(future_to_strategy):
+                    name = future_to_strategy[future]
+                    try:
+                        extracted = future.result()
+                    except Exception as e:
+                        extracted = {"Error": str(e)}
+                    
+                    # Merge result with base row
+                    res_row = base_row.copy()
+                    res_row.update(extracted)
+                    results_lists[name].append(res_row)
             
             # Save periodically (every 10 or last)
             if (index + 1) % 10 == 0 or (index + 1) == len(df):
-                temp_df = pd.DataFrame(results_list)
-                temp_df.to_excel(output_file, index=False, engine="openpyxl")
+                for name, res_list in results_lists.items():
+                    if res_list:
+                        temp_df = pd.DataFrame(res_list)
+                        temp_df.to_excel(output_files[name], index=False, engine="openpyxl")
                 
-        print(f"Done. Saved to {output_file}")
+        print(f"Done. All results saved.")

@@ -51,27 +51,53 @@ def select_shot_mode():
     return "zero"
 
 def select_strategy():
-    print("\nSelect strategy:")
+    print("\nSelect strategy (support multiple selections, e.g. '1,3,4' or 'all'):")
     print("1 = single (一次性提问，每篇论文独立Session)")
     print("2 = stepwise (分三步提问，每篇论文独立Session)")
     print("3 = stepwise_long (分三步提问，跨论文保留长上下文)")
     print("4 = cot (思维链，要求先推理后输出)")
     print("5 = reflection (自我反思，输出前先自查修正)")
-    choice = input("Enter choice (1-5): ").strip()
-    if choice == "2":
-        return "stepwise"
-    if choice == "3":
-        return "stepwise_long"
-    if choice == "4":
-        return "cot"
-    if choice == "5":
-        return "reflection"
-    return "single"
+    
+    choice_map = {
+        "1": "single",
+        "2": "stepwise",
+        "3": "stepwise_long",
+        "4": "cot",
+        "5": "reflection"
+    }
+    
+    while True:
+        choice = input("Enter choice (e.g. 1,4 or all): ").strip().lower()
+        if choice == "all":
+            return list(choice_map.values())
+            
+        selections = []
+        parts = choice.replace("，", ",").split(",")
+        valid = True
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            if part in choice_map:
+                selections.append(choice_map[part])
+            elif part in choice_map.values():
+                 selections.append(part)
+            else:
+                print(f"Invalid selection: {part}")
+                valid = False
+                break
+        
+        if valid and selections:
+            # Remove duplicates while preserving order
+            return list(dict.fromkeys(selections))
+        
+        if not valid or not selections:
+            print("Please try again.")
 
 def main():
     parser = argparse.ArgumentParser(description="Urban Renovation Paper Extraction Experiment")
     parser.add_argument("--shot", choices=["zero", "one", "few"], default=None, help="Prompt shot mode")
-    parser.add_argument("--strategy", choices=["single", "stepwise", "stepwise_long", "cot", "reflection"], default=None, help="Extraction strategy")
+    parser.add_argument("--strategy", help="Extraction strategy (comma separated or 'all')")
     parser.add_argument("--limit", type=int, help="Limit number of papers to process (for testing)")
     parser.add_argument("--input", help="Input Excel file path")
     parser.add_argument("--output", help="Output Excel file path")
@@ -108,14 +134,22 @@ def main():
          args.shot = select_shot_mode()
 
     # Step 3: Select strategy
+    strategies = []
     if args.strategy is None:
-        args.strategy = select_strategy()
+        strategies = select_strategy()
+    else:
+        # Parse command line argument if provided (e.g. --strategy "single,cot")
+        if args.strategy.lower() == "all":
+             strategies = ["single", "stepwise", "stepwise_long", "cot", "reflection"]
+        else:
+             parts = args.strategy.replace("，", ",").split(",")
+             strategies = [p.strip() for p in parts if p.strip()]
 
     print(f"\nStarting Experiment 1: Streaming Dialogue Extraction")
     print(f"Input: {args.input}")
-    print(f"Mode: {args.shot}-shot, strategy={args.strategy}")
+    print(f"Mode: {args.shot}-shot, strategies={strategies}")
     
-    processor = DataProcessor(shot_mode=args.shot, strategy=args.strategy)
+    processor = DataProcessor(shot_mode=args.shot, strategies=strategies)
     processor.run_batch(input_file=args.input, output_file=args.output, limit=args.limit)
 
 if __name__ == "__main__":

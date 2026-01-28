@@ -3,3 +3,4 @@ openpyxl>=3.1.0
 requests>=2.31.0
 tqdm>=4.66.0
 PyYAML>=6.0
+python-docx>=0.8.11
