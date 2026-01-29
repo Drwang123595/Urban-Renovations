@@ -32,9 +32,13 @@ class DataProcessor:
             # Instantiate each strategy separately
             self.strategies[name] = strategy_cls(self.client, self.prompt_gen)
         
+        # Split strategies into Parallel and Serial groups
+        self.serial_strategies = [name for name in self.strategy_names if name == "stepwise_long"]
+        self.parallel_strategies = [name for name in self.strategy_names if name != "stepwise_long"]
+        
     def run_batch(self, input_file: str = None, output_file: str = None, limit: int = None):
         """
-        Run the extraction on the Excel file.
+        Run the extraction on the Excel file using Hybrid Scheduler (Serial + Parallel).
         """
         input_path = Path(input_file) if input_file else self.config.INPUT_FILE
         task_name = input_path.stem  # e.g., "test1" from "test1.xlsx"
@@ -64,18 +68,14 @@ class DataProcessor:
         results_lists = {name: [] for name in self.strategy_names}
         
         if output_file:
-            # If user provided a specific output file, we handle it. 
-            # If multiple strategies, we append strategy name.
             base_output = Path(output_file)
             if len(self.strategy_names) == 1:
                 output_files[self.strategy_names[0]] = base_output
             else:
                 for name in self.strategy_names:
-                    # e.g. provided "out.xlsx" -> "out_single.xlsx", "out_cot.xlsx"
                     new_name = f"{base_output.stem}_{name}{base_output.suffix}"
                     output_files[name] = base_output.parent / new_name
         else:
-            # Default naming: {strategy}_{shot}_{timestamp}.xlsx
             for name in self.strategy_names:
                 filename = f"{name}_{self.prompt_gen.shot_mode}_{timestamp}.xlsx"
                 output_files[name] = output_dir / filename
@@ -100,7 +100,7 @@ class DataProcessor:
         if limit:
             df = df.head(limit)
             
-        # Ensure output directory exists (in case user provided custom path)
+        # Ensure output directory exists
         for f in output_files.values():
             f.parent.mkdir(parents=True, exist_ok=True)
         
@@ -110,21 +110,23 @@ class DataProcessor:
             "Label_Spatial", 
             "Label_Level", 
             "Label_Desc",
-            "是否属于城市更新研究",  # Possible existing label
+            "是否属于城市更新研究", 
             "空间研究/非空间研究",
             "空间等级",
             "具体空间描述",
-            "是否属于城市更新研究(人工)", # Common manual label name
+            "是否属于城市更新研究(人工)", 
         ]
         
         print(f"Processing {len(df)} papers with mode='{self.prompt_gen.shot_mode}'...")
-        print(f"Strategies: {self.strategy_names}")
+        print(f"Parallel Strategies: {self.parallel_strategies}")
+        print(f"Serial Strategies: {self.serial_strategies}")
         print(f"Task Workspace: {task_dir}")
         for name, path in output_files.items():
             print(f"Output for {name}: {path}")
             
         # Parallel Execution Logic
-        max_workers = len(self.strategy_names)
+        # Max workers for parallel strategies
+        max_workers = self.config.MAX_WORKERS
         
         for index, row in tqdm(df.iterrows(), total=len(df)):
             title = str(row.get("Article Title", "") or "")
@@ -139,35 +141,57 @@ class DataProcessor:
                 if col in base_row:
                     del base_row[col]
 
-            # Clean title for filename usage (keep alphanumeric + spaces, limit len)
+            # Clean title for filename usage
             clean_title = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
             clean_title = clean_title[:50]
             paper_id = f"{index+1:03d}_{clean_title}"
 
-            # Execute all strategies in parallel for this paper
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Prepare tasks with specific session paths
-                future_to_strategy = {}
-                for name, strategy_obj in self.strategies.items():
-                    # Construct semantic session path: history/sessions/{task_name}/{paper_id}/{strategy}.json
-                    session_path = self.config.SESSIONS_DIR / task_name / paper_id / f"{name}.json"
-                    
-                    future = executor.submit(strategy_obj.process, title, abstract, session_path)
-                    future_to_strategy[future] = name
-                
-                for future in as_completed(future_to_strategy):
-                    name = future_to_strategy[future]
-                    try:
-                        extracted = future.result()
-                    except Exception as e:
-                        extracted = {"Error": str(e)}
-                    
-                    # Merge result with base row
-                    res_row = base_row.copy()
-                    res_row.update(extracted)
-                    results_lists[name].append(res_row)
+            # ---------------------------------------------------------
+            # Hybrid Execution Block
+            # ---------------------------------------------------------
             
-            # Save periodically (every 10 or last)
+            # 1. Submit Parallel Tasks (ThreadPool)
+            futures = {}
+            if self.parallel_strategies:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    for name in self.parallel_strategies:
+                        strategy_obj = self.strategies[name]
+                        # Use ISOLATED session path for parallel execution
+                        session_path = self.config.SESSIONS_DIR / task_name / paper_id / f"{name}.json"
+                        
+                        future = executor.submit(strategy_obj.process, title, abstract, session_path)
+                        futures[future] = name
+                    
+                    # Wait for parallel tasks to complete and collect results
+                    for future in as_completed(futures):
+                        name = futures[future]
+                        try:
+                            extracted = future.result()
+                        except Exception as e:
+                            extracted = {"Error": str(e)}
+                        
+                        res_row = base_row.copy()
+                        res_row.update(extracted)
+                        results_lists[name].append(res_row)
+
+            # 2. Execute Serial Tasks (Main Thread)
+            # CRITICAL: Do NOT pass session_path (or pass None) to reuse the shared memory object
+            # This ensures Long Context memory is maintained across papers.
+            for name in self.serial_strategies:
+                strategy_obj = self.strategies[name]
+                try:
+                    # Pass None for session_path to trigger memory reuse in base.py
+                    extracted = strategy_obj.process(title, abstract, session_path=None)
+                except Exception as e:
+                    extracted = {"Error": str(e)}
+                
+                res_row = base_row.copy()
+                res_row.update(extracted)
+                results_lists[name].append(res_row)
+            
+            # ---------------------------------------------------------
+            
+            # Save periodically
             if (index + 1) % 10 == 0 or (index + 1) == len(df):
                 for name, res_list in results_lists.items():
                     if res_list:
