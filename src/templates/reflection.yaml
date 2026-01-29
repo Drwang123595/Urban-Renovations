@@ -1,8 +1,19 @@
-# Reflection Strategy Prompts
+# Reflection Strategy Prompts (Enhanced V4 - New Hierarchy)
 reflection_critique: |
-  Please review your previous answer carefully.
-  1. Did you strictly follow the definition of "Urban Renewal"? (Must target EXISTING built-up areas, not new development)
-  2. Did you correctly identify the spatial level?
+  Please review your previous answer carefully against the strict definitions.
+  
+  1. **Urban Renewal Check**: Did you confuse "general urbanization" or "new town development" with "Urban Renewal"? Renewal MUST target EXISTING built-up areas.
+  2. **Spatial Study Check**: Is the place mentioned the ACTUAL SUBJECT of research (data source/case study)? If it's just background context, Spatial Study must be 0.
+  3. **Spatial Level Check**: Did you pick strictly from the 9-level hierarchy?
+     - Global
+     - Multi-country/Region
+     - Country/Region
+     - Multi-province/State
+     - Province/State
+     - Urban Agglomeration
+     - Single City
+     - Multi-neighborhood/Block
+     - Single Neighborhood/Block
   
   If your previous answer was correct, output it again exactly.
   If it was wrong, correct it.

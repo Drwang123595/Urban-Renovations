@@ -1,12 +1,38 @@
-# CoT Strategy Prompts
+# CoT Strategy Prompts (Enhanced V4 - New Hierarchy)
 cot_instruction: |
   OUTPUT REQUIREMENTS:
-  1. First, provide a concise Chain of Thought reasoning process enclosed in <thinking> tags. Analyze the paper against the "Urban renewal" and "Spatial" definitions step by step.
+  1. First, provide a concise Chain of Thought reasoning process enclosed in <thinking> tags.
+  
+  Your thinking MUST follow these steps:
+  Step 1: Check "Urban Renewal" Intent.
+     - Does the study target EXISTING built-up areas?
+     - Is there an explicit INTERVENTION (renewal/regeneration/retrofit)?
+     - Rule out "New Town Development" and "General Urbanization".
+  
+  Step 2: Check "Spatial Study" & "Research Subject Alignment".
+     - Identify the geographic locations mentioned.
+     - Determine if these locations are the SUBJECT of research (data source/case study) or just CONTEXT (background).
+     - If Context only -> Spatial Study = 0.
+  
+  Step 3: Determine Spatial Level (Only if Spatial Study = 1).
+     - Match the research object to the 9-level hierarchy:
+       1. Global
+       2. Multi-country/Region
+       3. Country/Region
+       4. Multi-province/State
+       5. Province/State
+       6. Urban Agglomeration
+       7. Single City
+       8. Multi-neighborhood/Block
+       9. Single Neighborhood/Block
+     - Explain why you chose this level (e.g., "The study analyzes 3 specific neighborhoods, so it is Multi-neighborhood/Block").
+  
   2. Then, output EXACTLY one line with 4 fields (TAB-separated) as the final result.
   
   Example Format:
   <thinking>
-  The title mentions "urban regeneration", which is a synonym. The abstract discusses upgrading existing housing. P score is likely > 0.6.
-  The abstract mentions "London", so it is spatial. Level is City.
+  Step 1: The abstract discusses "micro-regeneration" of an old alleyway. This is clearly renewal of existing fabric. (Yes)
+  Step 2: The study conducts a survey in "Yongqing Fang, Guangzhou". This is the specific subject. (Yes)
+  Step 3: Yongqing Fang is a specific project site/neighborhood within Guangzhou. Level is "Single Neighborhood/Block".
   </thinking>
-  1	1	City	United Kingdom-England-London
+  1	1	Single Neighborhood/Block	China-Guangdong-Guangzhou-Yongqing Fang
