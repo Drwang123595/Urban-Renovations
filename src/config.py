@@ -48,7 +48,8 @@ class Config:
                     if not line or line.startswith("#") or "=" not in line:
                         continue
                     key, value = line.split("=", 1)
-                    os.environ[key.strip()] = value.strip()
+                    value = value.split("#", 1)[0].strip()
+                    os.environ[key.strip()] = value
             
             # Update class attributes after loading env
             # Priority: LLM_ > DEEPSEEK_ > Default

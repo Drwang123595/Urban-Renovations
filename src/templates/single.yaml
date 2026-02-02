@@ -1,35 +1,26 @@
 # Single Strategy Prompts (Enhanced V4 - User Defined Hierarchy)
 single_system: |
   ```text
-  You are a literature annotator for “Urban Renewal / Urban Regeneration” studies. 
+  You are a literature screener. Based ONLY on the paper’s TITLE and ABSTRACT, classify whether the study’s main subject is “urban renewal / urban regeneration / redevelopment / urban transformation”. 
+  
   Your task is to analyze the [TITLE] and [ABSTRACT] to extract 4 fields. 
-  
-  CRITICAL: You must distinguish between the "Subject of Study" (what is being researched) and "Background Context" (general intro).
-  
   Output EXACTLY one line with 4 fields, TAB-separated:
-  (1) Urban renewal study? (1/0)
+  (1) Urban renewal study? (1/0/待确定)
   (2) Spatial study? (1/0)
   (3) Spatial level (Choose from 9 specific levels or "Not mentioned")
   (4) Specific spatial description (String or "Not mentioned")
 
   ========================
-  Field 1: Urban Renewal Study? (1 = Yes, 0 = No)
+  Field 1: Urban Renewal Study? (Output choose exactly one: 1 / 0 / 待确定)
   
-  **Definition**: Research that targets the IMPROVEMENT, REGENERATION, or REDEVELOPMENT of **EXISTING built-up areas**.
+  1  = Urban renewal/regeneration is the core research object (project/policy/process/governance/mechanism/impact evaluation). 
+  0  = Clearly not about urban renewal/regeneration; any mention is absent or negligible. 
+  待确定  = Related to urban renewal/regeneration but not the main subject (e.g., methods/tools that “can inform renewal”, renewal only as background/context/policy implication). 
   
-  **JUDGMENT LOGIC (Thinking Process):**
-  1. Does the paper deal with *existing* urban fabric? (If it's about building a new town on empty land -> NO)
-  2. Is there an *intervention* intent? (e.g., physical upgrade, social revitalization, economic regeneration)
-  3. Is the term "renewal/regeneration" used as a core concept, not just a buzzword?
-  
-  **YES Signals:**
-  - Keywords: Urban renewal, regeneration, rehabilitation, retrofit, brownfield redevelopment, slum upgrading, gentrification (in renewal context), adaptive reuse.
-  - Objects: Old communities, decaying districts, industrial heritage, urban villages.
-  
-  **NO Signals (Strict Exclusion):**
-  - Pure New Town Development / Urban Expansion.
-  - General Urbanization studies (e.g., "urbanization rate analysis") without a renewal focus.
-  - Pure Real Estate market analysis (unless specifically about renewal projects).
+  Decision rules (apply in order):
+  - If the title/abstract explicitly studies urban renewal/regeneration/redevelopment (e.g., housing regeneration, neighborhood renewal, micro-renewal, waterfront regeneration, brownfield reuse, demolition & rebuild, slum clearance, Raze and Rebuild, etc.), or evaluates a renewal program/policy/project → output 1 . 
+  - If renewal is only a context/application/implication (methods, indicators, CFD, remote sensing, ML, health studies where renewal is a background variable) → output 待确定 . 
+  - If unrelated or only generic “renewal/regeneration” wording without an urban-renewal context → output 0 . 
 
   ========================
   Field 2: Spatial Study? (1 = Yes, 0 = No)
@@ -107,8 +98,8 @@ examples:
     3. Title: Spatial distribution of public housing in Beijing
        Abstract: We analyze 500 communities in Beijing to assess public service access.
        Output:
-       0	1	Single City	China-Beijing
-       (Reason: Spatial study yes (Beijing), but public housing distribution is not necessarily renewal).
+       待确定	1	Single City	China-Beijing
+       (Reason: Spatial study yes (Beijing), but public housing distribution is not necessarily renewal, might be related).
 
     4. Title: Micro-regeneration of the Yongqing Fang alley
        Abstract: A case study of the Yongqing Fang project in Guangzhou.

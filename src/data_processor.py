@@ -128,32 +128,34 @@ class DataProcessor:
         # Max workers for parallel strategies
         max_workers = self.config.MAX_WORKERS
         
-        for index, row in tqdm(df.iterrows(), total=len(df)):
-            title = str(row.get("Article Title", "") or "")
-            abstract = str(row.get("Abstract", "") or "")
-            
-            if not title and not abstract:
-                continue
+        # Instantiate executor OUTSIDE the loop to reuse threads
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for index, row in tqdm(df.iterrows(), total=len(df)):
+                title = str(row.get("Article Title", "") or "")
+                abstract = str(row.get("Abstract", "") or "")
                 
-            # Clean row: remove label columns before adding new results
-            base_row = row.to_dict()
-            for col in exclude_cols:
-                if col in base_row:
-                    del base_row[col]
+                if not title and not abstract:
+                    continue
+                    
+                # Clean row: remove label columns before adding new results
+                base_row = row.to_dict()
+                for col in exclude_cols:
+                    if col in base_row:
+                        del base_row[col]
 
-            # Clean title for filename usage
-            clean_title = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
-            clean_title = clean_title[:50]
-            paper_id = f"{index+1:03d}_{clean_title}"
+                # Clean title for filename usage
+                clean_title = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
+                clean_title = clean_title[:50]
+                paper_id = f"{index+1:03d}_{clean_title}"
 
-            # ---------------------------------------------------------
-            # Hybrid Execution Block
-            # ---------------------------------------------------------
-            
-            # 1. Submit Parallel Tasks (ThreadPool)
-            futures = {}
-            if self.parallel_strategies:
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # ---------------------------------------------------------
+                # Hybrid Execution Block
+                # ---------------------------------------------------------
+                
+                # 1. Submit Parallel Tasks (ThreadPool)
+                futures = {}
+                if self.parallel_strategies:
+                    # Executor is now reused
                     for name in self.parallel_strategies:
                         strategy_obj = self.strategies[name]
                         # Use ISOLATED session path for parallel execution
@@ -174,28 +176,28 @@ class DataProcessor:
                         res_row.update(extracted)
                         results_lists[name].append(res_row)
 
-            # 2. Execute Serial Tasks (Main Thread)
-            # CRITICAL: Do NOT pass session_path (or pass None) to reuse the shared memory object
-            # This ensures Long Context memory is maintained across papers.
-            for name in self.serial_strategies:
-                strategy_obj = self.strategies[name]
-                try:
-                    # Pass None for session_path to trigger memory reuse in base.py
-                    extracted = strategy_obj.process(title, abstract, session_path=None)
-                except Exception as e:
-                    extracted = {"Error": str(e)}
+                # 2. Execute Serial Tasks (Main Thread)
+                # CRITICAL: Do NOT pass session_path (or pass None) to reuse the shared memory object
+                # This ensures Long Context memory is maintained across papers.
+                for name in self.serial_strategies:
+                    strategy_obj = self.strategies[name]
+                    try:
+                        # Pass None for session_path to trigger memory reuse in base.py
+                        extracted = strategy_obj.process(title, abstract, session_path=None)
+                    except Exception as e:
+                        extracted = {"Error": str(e)}
+                    
+                    res_row = base_row.copy()
+                    res_row.update(extracted)
+                    results_lists[name].append(res_row)
                 
-                res_row = base_row.copy()
-                res_row.update(extracted)
-                results_lists[name].append(res_row)
-            
-            # ---------------------------------------------------------
-            
-            # Save periodically
-            if (index + 1) % 10 == 0 or (index + 1) == len(df):
-                for name, res_list in results_lists.items():
-                    if res_list:
-                        temp_df = pd.DataFrame(res_list)
-                        temp_df.to_excel(output_files[name], index=False, engine="openpyxl")
+                # ---------------------------------------------------------
                 
+                # Save periodically
+                if (index + 1) % 10 == 0 or (index + 1) == len(df):
+                    for name, res_list in results_lists.items():
+                        if res_list:
+                            temp_df = pd.DataFrame(res_list)
+                            temp_df.to_excel(output_files[name], index=False, engine="openpyxl")
+                    
         print(f"Done. All results saved.")

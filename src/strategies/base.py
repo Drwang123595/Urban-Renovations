@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
+import re
 from ..llm_client import DeepSeekClient
 from ..prompts import PromptGenerator
 from ..memory import ConversationMemory
@@ -67,7 +68,28 @@ class ExtractionStrategy(ABC):
         }
 
     def parse_single_output(self, text: str) -> str:
-        """Helper to parse single line output."""
+        """
+        Helper to parse single line output.
+        Enhanced to extract specific tokens (1, 0, 待确定) if present,
+        cleaning up potential noise like 'Step 1: 1' or '1 (Yes)'.
+        """
+        raw_text = text.strip()
+        if not raw_text:
+            return ""
+            
+        # Prioritize matching exact expected tokens
+        # 1. Check for '待确定'
+        if "待确定" in raw_text:
+            return "待确定"
+            
+        # 2. Check for single digit 1 or 0 isolated or at start/end
+        # Regex looks for 1 or 0 that is NOT surrounded by other digits (e.g. 10, 2024)
+        # It allows surrounding text like "Output: 1" or "1."
+        match = re.search(r'(?<!\d)(1|0)(?!\d)', raw_text)
+        if match:
+            return match.group(1)
+            
+        # Fallback: return the first non-empty line as is
         for raw in text.splitlines():
             if raw.strip():
                 return raw.strip()
@@ -75,7 +97,13 @@ class ExtractionStrategy(ABC):
 
     def parse_two_field_output(self, text: str) -> Dict[str, Any]:
         """Helper to parse TAB-separated output (2 fields)."""
-        line = self.parse_single_output(text)
+        # For multi-field, we still take the first valid line
+        line = ""
+        for raw in text.splitlines():
+            if raw.strip():
+                line = raw.strip()
+                break
+                
         if not line:
             return {}
         parts = [p.strip() for p in line.split("\t")]

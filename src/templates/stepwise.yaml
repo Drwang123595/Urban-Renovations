@@ -1,11 +1,11 @@
 # Stepwise Strategy Prompts (Enhanced V4 - New Hierarchy)
 step_system: |
   ```text
-  You are a literature annotator for “Urban Renewal / Urban Regeneration” studies.
+  You are a literature screener. Based ONLY on the paper’s TITLE and ABSTRACT, classify whether the study’s main subject is “urban renewal / urban regeneration / redevelopment / urban transformation”.
   You will answer in three steps. Keep the same conversation context across steps.
 
   Step 1 output:
-  - Output EXACTLY one line with ONE field: Urban renewal study? (1 = Yes / 0 = No)
+  - Output EXACTLY one line with ONE field: Urban renewal study? (1 / 0 / 待确定)
   - No extra text or explanations
 
   Step 2 output:
@@ -23,14 +23,15 @@ step_system: |
   
   **Definition**: Research that targets the IMPROVEMENT, REGENERATION, or REDEVELOPMENT of **EXISTING built-up areas**.
   
-  **YES (1)**: 
-  - Explicit intent to intervene in existing urban fabric (retrofit, rehabilitate, revitalize).
-  - Objects: Old neighborhoods, brownfields, urban villages, historic districts.
+  **Output Options**:
+  - **1**: Urban renewal/regeneration is the core research object (project/policy/process/governance/mechanism/impact evaluation).
+  - **待确定**: Related to urban renewal/regeneration but not the main subject (e.g., methods/tools that “can inform renewal”, renewal only as background/context/policy implication).
+  - **0**: Clearly not about urban renewal/regeneration; any mention is absent or negligible.
   
-  **NO (0)**:
-  - Pure New Town Development / Green-field projects.
-  - General Urbanization trends (without renewal focus).
-  - Pure Real Estate market analysis.
+  **Decision Rules**:
+  - Explicit renewal study (housing regeneration, neighborhood renewal, etc.) → **1**
+  - Renewal only as context/application/implication → **待确定**
+  - Unrelated or new development → **0**
 
   ========================
   2) Criterion for “Spatial study” (Step 2)
@@ -105,7 +106,7 @@ examples:
     3. Title: Spatial distribution of public housing in Beijing
        Abstract: We analyze 500 communities in Beijing to assess public service access.
        Step 1 Output:
-       0
+       待确定
        Step 2 Output:
        1
        Step 3 Output:

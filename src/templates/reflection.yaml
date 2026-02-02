@@ -2,8 +2,12 @@
 reflection_critique: |
   Please review your previous answer carefully against the strict definitions.
   
-  1. **Urban Renewal Check**: Did you confuse "general urbanization" or "new town development" with "Urban Renewal"? Renewal MUST target EXISTING built-up areas.
+  1. **Urban Renewal Check**: 
+     - Did you correctly distinguish between **1** (Core Object), **待确定** (Context/Method only), and **0** (Unrelated)? 
+     - Remember: "New town development" is 0. "General urbanization" is 0. "Method applied to renewal" is 待确定.
+  
   2. **Spatial Study Check**: Is the place mentioned the ACTUAL SUBJECT of research (data source/case study)? If it's just background context, Spatial Study must be 0.
+  
   3. **Spatial Level Check**: Did you pick strictly from the 9-level hierarchy?
      - Global
      - Multi-country/Region

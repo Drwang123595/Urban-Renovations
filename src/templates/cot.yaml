@@ -7,7 +7,10 @@ cot_instruction: |
   Step 1: Check "Urban Renewal" Intent.
      - Does the study target EXISTING built-up areas?
      - Is there an explicit INTERVENTION (renewal/regeneration/retrofit)?
-     - Rule out "New Town Development" and "General Urbanization".
+     - Check Decision Rules:
+       - Explicit renewal study -> 1
+       - Context/background/method application -> 待确定
+       - Unrelated/New town -> 0
   
   Step 2: Check "Spatial Study" & "Research Subject Alignment".
      - Identify the geographic locations mentioned.
