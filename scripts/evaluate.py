@@ -91,6 +91,14 @@ def evaluate_single_file(pred_file, truth_df):
     # Ensure these exist
     final_cols = [c for c in base_cols if c in merged.columns]
     
+    # Helper for normalization
+    def normalize(val):
+        """Normalize values to integers 1/0 if possible, else return original string."""
+        s = str(val).strip()
+        if s.replace('.0', '') == '1': return 1
+        if s.replace('.0', '') == '0': return 0
+        return s # Return original string for '待确定' or other text
+
     # Calculate Metrics and Add Diff Columns
     for truth_col, pred_col, desc in mappings:
         t_col = f"{truth_col}_truth" if f"{truth_col}_truth" in merged.columns else truth_col
@@ -99,28 +107,47 @@ def evaluate_single_file(pred_file, truth_df):
         if t_col not in merged.columns or p_col not in merged.columns:
             continue
 
-        # Handle numeric/string conversion safely
-        # For numeric metrics (0/1), convert. For strings (Level/Desc), keep as is.
+        # Normalize columns for comparison
+        t_norm = merged[t_col].apply(normalize)
+        p_norm = merged[p_col].apply(normalize)
+        
+        # Determine if it's a numeric metric (Urban Renewal, Spatial Study)
         is_numeric = desc in ["Urban Renewal", "Spatial Study"]
         
-        if is_numeric:
-            truth_vals = pd.to_numeric(merged[t_col], errors="coerce").fillna(0).astype(int)
-            pred_vals = pd.to_numeric(merged[p_col], errors="coerce").fillna(0).astype(int)
-        else:
-            truth_vals = merged[t_col].fillna("").astype(str).str.strip()
-            pred_vals = merged[p_col].fillna("").astype(str).str.strip()
+        # STRICT BINARY MATCH LOGIC:
+        # Diff = 1 if (Truth == Pred) AND (Pred is 0 or 1)
+        # Diff = 0 otherwise (mismatch, or Pred is '待确定'/'Unknown')
+        condition = (t_norm == p_norm) & (p_norm.isin([0, 1]))
         
-        # Calculate Metrics
-        correct = (truth_vals == pred_vals).sum()
-        total = len(truth_vals)
+        # Store Diff
+        diff_col_name = f"Diff_{desc}"
+        merged[diff_col_name] = np.where(condition, 1, 0)
+        
+        # Calculate Metrics based on strict diff
+        correct = merged[diff_col_name].sum()
+        total = len(merged)
         accuracy = correct / total * 100.0 if total > 0 else 0
         
-        # Simple Confusion Matrix (Only for numeric)
+        # Simple Confusion Matrix (Only for numeric-like fields where 1/0 matters)
         if is_numeric:
-            tp = ((truth_vals == 1) & (pred_vals == 1)).sum()
-            tn = ((truth_vals == 0) & (pred_vals == 0)).sum()
-            fp = ((truth_vals == 0) & (pred_vals == 1)).sum()
-            fn = ((truth_vals == 1) & (pred_vals == 0)).sum()
+            # We map strictly: 1->1, 0->0, others->exclude or treat as 0?
+            # Standard confusion matrix needs ground truth 0/1. 
+            # If Truth is '待确定', we can't really say if it's TP/TN.
+            # Here we follow the Diff logic: only count clear 0/1 cases.
+            
+            # Helper to map for matrix: 1->1, 0->0, others->-1
+            def map_bin(v):
+                if v == 1: return 1
+                if v == 0: return 0
+                return -1
+
+            t_bin = t_norm.apply(map_bin)
+            p_bin = p_norm.apply(map_bin)
+            
+            tp = ((t_bin == 1) & (p_bin == 1)).sum()
+            tn = ((t_bin == 0) & (p_bin == 0)).sum()
+            fp = ((t_bin == 0) & (p_bin == 1)).sum()
+            fn = ((t_bin == 1) & (p_bin == 0)).sum()
         else:
             tp, tn, fp, fn = 0, 0, 0, 0
         
@@ -132,10 +159,6 @@ def evaluate_single_file(pred_file, truth_df):
             "Total": total,
             "TP": tp, "TN": tn, "FP": fp, "FN": fn
         })
-        
-        # Add Diff Column: 1 = Match, 0 = Mismatch
-        diff_col_name = f"Diff_{desc}"
-        merged[diff_col_name] = np.where(truth_vals == pred_vals, 1, 0)
         
         # Add to column order: Truth, Pred, Diff
         final_cols.extend([t_col, p_col, diff_col_name])
