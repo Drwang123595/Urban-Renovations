@@ -5,6 +5,7 @@ from .stepwise import StepwiseStrategy
 from .stepwise_long import StepwiseLongContextStrategy
 from .cot import CoTStrategy
 from .reflection import ReflectionStrategy
+from .spatial import SpatialExtractionStrategy
 
 class StrategyRegistry:
     _strategies: Dict[str, Type[ExtractionStrategy]] = {
@@ -12,7 +13,8 @@ class StrategyRegistry:
         "stepwise": StepwiseStrategy,
         "stepwise_long": StepwiseLongContextStrategy,
         "cot": CoTStrategy,
-        "reflection": ReflectionStrategy
+        "reflection": ReflectionStrategy,
+        "spatial": SpatialExtractionStrategy
     }
 
     @classmethod

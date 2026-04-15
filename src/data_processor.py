@@ -6,35 +6,60 @@ from pathlib import Path
 from typing import Dict, Any, List, Union
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .config import Config
+from .config import Config, Schema
 from .llm_client import DeepSeekClient
 from .prompts import PromptGenerator
-from .strategies import StrategyRegistry
+from .strategies import StrategyRegistry, ExtractionStrategy
 
 class DataProcessor:
-    def __init__(self, shot_mode: str = "zero", strategies: Union[str, List[str]] = "single"):
+    def __init__(self, 
+                 client: DeepSeekClient = None, 
+                 prompt_gen: PromptGenerator = None,
+                 shot_mode: str = "zero", 
+                 strategies: Union[str, List[str]] = "single"):
+        """
+        Initialize DataProcessor with dependency injection.
+        """
         self.config = Config()
-        self.client = DeepSeekClient()
-        self.prompt_gen = PromptGenerator(shot_mode=shot_mode)
+        self.client = client or DeepSeekClient()
+        self.prompt_gen = prompt_gen or PromptGenerator(shot_mode=shot_mode)
         
         if isinstance(strategies, str):
             self.strategy_names = [strategies]
         else:
             self.strategy_names = strategies
             
-        self.strategies = {}
+        self.strategies: Dict[str, ExtractionStrategy] = {}
         available_strategies = StrategyRegistry.list_strategies()
         
         for name in self.strategy_names:
             strategy_cls = StrategyRegistry.get_strategy(name)
             if not strategy_cls:
-                raise ValueError(f"Unknown strategy: {name}. Available: {available_strategies}")
-            # Instantiate each strategy separately
+                raise ValueError(f"非法策略: {name}. 可选策略: {available_strategies}")
             self.strategies[name] = strategy_cls(self.client, self.prompt_gen)
+        self._validate_prompt_routes()
         
         # Split strategies into Parallel and Serial groups
         self.serial_strategies = [name for name in self.strategy_names if name == "stepwise_long"]
         self.parallel_strategies = [name for name in self.strategy_names if name != "stepwise_long"]
+
+    def _validate_prompt_routes(self):
+        for name in self.strategy_names:
+            if name == "cot":
+                self.prompt_gen.get_cot_system_prompt()
+            elif name == "spatial":
+                self.prompt_gen.get_spatial_system_prompt()
+            elif name == "stepwise" or name == "stepwise_long":
+                self.prompt_gen.get_step_system_prompt()
+            elif name == "reflection":
+                self.prompt_gen.get_reflection_system_prompt()
+            else:
+                self.prompt_gen.get_single_system_prompt()
+
+    def _raise_fatal_strategy_error(self, strategy_name: str, error: Exception):
+        raise RuntimeError(
+            f"策略执行失败并已终止: strategy={strategy_name}, error={type(error).__name__}: {error}"
+        ) from error
         
     def run_batch(self, input_file: str = None, output_file: str = None, limit: int = None):
         """
@@ -170,6 +195,8 @@ class DataProcessor:
                         try:
                             extracted = future.result()
                         except Exception as e:
+                            if isinstance(e, (FileNotFoundError, ValueError)):
+                                self._raise_fatal_strategy_error(name, e)
                             extracted = {"Error": str(e)}
                         
                         res_row = base_row.copy()
@@ -182,9 +209,10 @@ class DataProcessor:
                 for name in self.serial_strategies:
                     strategy_obj = self.strategies[name]
                     try:
-                        # Pass None for session_path to trigger memory reuse in base.py
                         extracted = strategy_obj.process(title, abstract, session_path=None)
                     except Exception as e:
+                        if isinstance(e, (FileNotFoundError, ValueError)):
+                            self._raise_fatal_strategy_error(name, e)
                         extracted = {"Error": str(e)}
                     
                     res_row = base_row.copy()
@@ -201,3 +229,74 @@ class DataProcessor:
                             temp_df.to_excel(output_files[name], index=False, engine="openpyxl")
                     
         print(f"Done. All results saved.")
+
+        # Auto-merge for combined workflow (stepwise_long + spatial)
+        self._auto_merge_results(output_files, results_lists, timestamp)
+
+    def _auto_merge_results(self, output_files: Dict[str, Path], results_lists: Dict[str, List], timestamp: str):
+        """
+        Automatically merge results when both stepwise_long and spatial strategies are run together.
+        Merge logic: Use stepwise_long's urban renewal judgment + spatial's spatial attributes.
+        """
+        has_stepwise = "stepwise_long" in self.strategy_names
+        has_spatial = "spatial" in self.strategy_names
+
+        if not (has_stepwise and has_spatial):
+            return
+
+        print("\n[INFO] Auto-merging stepwise_long + spatial results...")
+
+        stepwise_file = output_files.get("stepwise_long")
+        spatial_file = output_files.get("spatial")
+
+        if not stepwise_file or not spatial_file:
+            return
+
+        if not stepwise_file.exists() or not spatial_file.exists():
+            print("[WARN] Could not find output files for merge.")
+            return
+
+        try:
+            df_stepwise = pd.read_excel(stepwise_file, engine="openpyxl")
+            df_spatial = pd.read_excel(spatial_file, engine="openpyxl")
+
+            if "Article Title" not in df_stepwise.columns or "Article Title" not in df_spatial.columns:
+                print("[WARN] Missing 'Article Title' column for merge.")
+                return
+
+            key_col = "Article Title"
+            df_stepwise["_key"] = df_stepwise[key_col].astype(str).str.strip().str.lower()
+            df_spatial["_key"] = df_spatial[key_col].astype(str).str.strip().str.lower()
+
+            merged = pd.merge(
+                df_stepwise,
+                df_spatial[["_key", "空间研究/非空间研究", "空间等级", "具体空间描述", "Reasoning", "Confidence"]],
+                on="_key",
+                suffixes=("", "_spatial"),
+                how="left"
+            )
+
+            final_cols = ["Article Title", "Abstract"]
+            if "是否属于城市更新研究" in merged.columns:
+                final_cols.append("是否属于城市更新研究")
+
+            spatial_cols = ["空间研究/非空间研究", "空间等级", "具体空间描述"]
+            for col in spatial_cols:
+                if f"{col}_spatial" in merged.columns:
+                    merged[col] = merged[f"{col}_spatial"]
+
+            for col in final_cols + spatial_cols + ["Reasoning", "Confidence"]:
+                if col in merged.columns and col not in final_cols:
+                    final_cols.append(col)
+
+            remaining = [c for c in merged.columns if c not in final_cols and c != "_key" and not c.endswith("_spatial")]
+            final_cols.extend(remaining)
+
+            merged = merged[final_cols]
+
+            merge_output = stepwise_file.parent / f"merged_{timestamp}.xlsx"
+            merged.to_excel(merge_output, index=False, engine="openpyxl")
+            print(f"[INFO] Merged results saved to: {merge_output}")
+
+        except Exception as e:
+            print(f"[ERROR] Failed to merge results: {e}")

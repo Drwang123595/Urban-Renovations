@@ -10,7 +10,7 @@ class ExtractionStrategy(ABC):
     def __init__(self, client: DeepSeekClient, prompt_gen: PromptGenerator):
         self.client = client
         self.prompt_gen = prompt_gen
-        self.memory: Optional[ConversationMemory] = None
+        # Removed self.memory to ensure statelessness in concurrent execution
 
     @abstractmethod
     def process(self, title: str, abstract: str, session_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -24,32 +24,34 @@ class ExtractionStrategy(ABC):
         """
         pass
 
-    def _get_or_create_memory(self, system_prompt: str, session_path: Optional[Union[str, Path]] = None) -> ConversationMemory:
+    def _create_memory(
+        self,
+        system_prompt: str,
+        session_path: Optional[Union[str, Path]] = None,
+        audit_metadata: Optional[Dict[str, Any]] = None,
+    ) -> ConversationMemory:
         """
-        Get existing memory or create new one if full/missing.
-        Handles session rotation for long contexts.
+        Create a new isolated memory instance for a session.
+        If session_path is provided, we skip global index update to prevent concurrency issues.
         """
-        if self.memory and self.memory.is_context_full():
-            # Memory full, force save (already done by add_message) and reset
-            print(f"\n[INFO] Context full (Session {self.memory.session_id}). Starting new session.")
-            self.memory = None
-
-        if self.memory is None:
-            # Create new memory
-            # If session_path is provided, we skip global index update to prevent concurrency issues
-            skip_index = True if session_path else False
-            self.memory = ConversationMemory(
-                system_prompt=system_prompt, 
-                session_path=session_path,
-                skip_index=skip_index
-            )
-            if not session_path:
-                print(f"\n[INFO] Created new session: {self.memory.session_id}")
+        skip_index = True if session_path else False
+        memory_audit = {"strategy_name": self.__class__.__name__}
+        if audit_metadata:
+            memory_audit.update(audit_metadata)
+        memory = ConversationMemory(
+            system_prompt=system_prompt, 
+            session_path=session_path,
+            skip_index=skip_index,
+            audit_metadata=memory_audit,
+        )
+        if not session_path:
+            # Only print for new auto-generated sessions
+            print(f"\n[INFO] Created new session: {memory.session_id}")
             
-        return self.memory
+        return memory
 
     def parse_tab_output(self, text: str) -> Dict[str, Any]:
-        """Helper to parse TAB-separated output (4 fields)."""
+        """Helper to parse TAB-separated output (4 fields). Enforces strict 1/0."""
         line = ""
         for raw in text.splitlines():
             if raw.strip():
@@ -60,9 +62,14 @@ class ExtractionStrategy(ABC):
         parts = [p.strip() for p in line.split("\t")]
         if len(parts) < 4:
             return {}
+            
+        # Enforce 1/0 on first two fields
+        field1 = self.parse_single_output(parts[0])
+        field2 = self.parse_single_output(parts[1])
+        
         return {
-            "是否属于城市更新研究": parts[0],
-            "空间研究/非空间研究": parts[1],
+            "是否属于城市更新研究": field1,
+            "空间研究/非空间研究": field2,
             "空间等级": parts[2],
             "具体空间描述": parts[3],
         }
@@ -70,30 +77,27 @@ class ExtractionStrategy(ABC):
     def parse_single_output(self, text: str) -> str:
         """
         Helper to parse single line output.
-        Enhanced to extract specific tokens (1, 0, 待确定) if present,
-        cleaning up potential noise like 'Step 1: 1' or '1 (Yes)'.
+        Strictly returns '1' or '0'. Defaults to '0' if unclear.
         """
         raw_text = text.strip()
         if not raw_text:
-            return ""
+            return "0"
             
-        # Prioritize matching exact expected tokens
-        # 1. Check for '待确定'
-        if "待确定" in raw_text:
-            return "待确定"
-            
-        # 2. Check for single digit 1 or 0 isolated or at start/end
-        # Regex looks for 1 or 0 that is NOT surrounded by other digits (e.g. 10, 2024)
-        # It allows surrounding text like "Output: 1" or "1."
-        match = re.search(r'(?<!\d)(1|0)(?!\d)', raw_text)
+        # 1. Pre-process to remove common labels that might contain digits
+        # e.g. "Step 1: 0", "Field 1: 0" -> ": 0"
+        clean_text = re.sub(r'(Step|Field|Phase)\s*\d+', '', raw_text, flags=re.IGNORECASE)
+        
+        # 2. Check for explicit 1 or 0
+        match = re.search(r'(?<!\d)(1|0)(?!\d)', clean_text)
         if match:
             return match.group(1)
             
-        # Fallback: return the first non-empty line as is
-        for raw in text.splitlines():
-            if raw.strip():
-                return raw.strip()
-        return ""
+        # 2. If no clear 1/0 found, check for "Yes"/"No" keywords as fallback
+        if re.search(r'\b(yes|true)\b', raw_text, re.IGNORECASE):
+            return "1"
+        
+        # Default to 0 for any other case (including "Unsure", "待确定", etc.)
+        return "0"
 
     def parse_two_field_output(self, text: str) -> Dict[str, Any]:
         """Helper to parse TAB-separated output (2 fields)."""

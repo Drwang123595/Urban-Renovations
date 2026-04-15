@@ -23,6 +23,7 @@ class SingleTurnStrategy(ExtractionStrategy):
         resp = self.client.chat_completion(memory.get_messages())
         if not resp:
             return {}
-            
-        memory.add_assistant_message(resp)  # Save response to history
-        return self.parse_tab_output(resp)
+
+        memory.add_assistant_message(resp)
+        urban_val = self.parse_single_output(resp)
+        return {"是否属于城市更新研究": urban_val}

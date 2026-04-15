@@ -1,14 +1,58 @@
+import importlib.util
+import logging
 import os
+import sys
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
+
+from dotenv import load_dotenv
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+class Schema:
+    # Excel Column Names (Input)
+    TITLE = "Article Title"
+    ABSTRACT = "Abstract"
+    AUTHOR_KEYWORDS = "Author Keywords"
+    KEYWORDS_PLUS = "Keywords Plus"
+    KEYWORDS = "Keywords"
+    WOS_CATEGORIES = "WoS Categories"
+    RESEARCH_AREAS = "Research Areas"
+    
+    # Extraction Field Names (Internal & Output)
+    IS_URBAN_RENEWAL = "是否属于城市更新研究"
+    IS_SPATIAL = "空间研究/非空间研究"
+    SPATIAL_LEVEL = "空间等级"
+    SPATIAL_DESC = "具体空间描述"
+    
+    # All fields for consistent ordering
+    FIELDS = [IS_URBAN_RENEWAL, IS_SPATIAL, SPATIAL_LEVEL, SPATIAL_DESC]
 
 class Config:
     # Project Root
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
     
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
     # Data Paths
-    DATA_DIR = PROJECT_ROOT / "Data"
-    TRAIN_DIR = DATA_DIR / "train"  # New directory for original task files
+    DATA_DIR = PROJECT_ROOT / "data"
+    if (PROJECT_ROOT / "Data").exists() and not DATA_DIR.exists():
+        DATA_DIR = PROJECT_ROOT / "Data"
+    TRAIN_DIR = DATA_DIR / "train"
+    OUTPUT_DIR = PROJECT_ROOT / "output"
+    MODELS_DIR = OUTPUT_DIR / "models"
+    BERTOPIC_ARTIFACT_DIR = MODELS_DIR / "urban_bertopic_online_py313"
+    PY313_VENV_PYTHON = PROJECT_ROOT / ".venv-bertopic313" / "Scripts" / "python.exe"
     
     INPUT_FILE = TRAIN_DIR / "test1.xlsx" # Updated default
     
@@ -29,6 +73,21 @@ class Config:
     MAX_TOKENS = int(os.environ.get("MAX_TOKENS", 500))
     TIMEOUT = int(os.environ.get("TIMEOUT", 60))
     MAX_WORKERS = int(os.environ.get("MAX_WORKERS", 1)) # Default 1 for safety
+    PERSIST_FULL_SESSIONS = _env_flag("PERSIST_FULL_SESSIONS", False)
+    AUDIT_FIELD_MAX_CHARS = int(os.environ.get("AUDIT_FIELD_MAX_CHARS", 240))
+    SESSION_MESSAGE_MAX_CHARS = int(os.environ.get("SESSION_MESSAGE_MAX_CHARS", 1200))
+    DEBUG_SENSITIVE_LOGGING = _env_flag("DEBUG_SENSITIVE_LOGGING", False)
+    BERTOPIC_INTEGRITY_KEY = os.environ.get("BERTOPIC_INTEGRITY_KEY", "")
+    BERTOPIC_PRIMARY_ENABLED = _env_flag("BERTOPIC_PRIMARY_ENABLED", True)
+    BERTOPIC_PRIMARY_MIN_SUPPORT = int(os.environ.get("BERTOPIC_PRIMARY_MIN_SUPPORT", 35))
+    BERTOPIC_PRIMARY_MIN_PURITY = float(os.environ.get("BERTOPIC_PRIMARY_MIN_PURITY", 0.80))
+    BERTOPIC_PRIMARY_MIN_PROB = float(os.environ.get("BERTOPIC_PRIMARY_MIN_PROB", 0.50))
+    BERTOPIC_PRIMARY_MIN_MAPPED_SHARE = float(
+        os.environ.get("BERTOPIC_PRIMARY_MIN_MAPPED_SHARE", 0.70)
+    )
+    BERTOPIC_EMBEDDING_MODEL = os.environ.get("BERTOPIC_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    URBAN_HYBRID_LLM_ASSIST_ENABLED = _env_flag("URBAN_HYBRID_LLM_ASSIST_ENABLED", True)
+    RECOMMENDED_PYTHON = "3.13"
     
     # Context Limits
     MAX_CONTEXT_TOKENS = 128000
@@ -36,20 +95,15 @@ class Config:
 
     @classmethod
     def load_env(cls, env_path: Optional[Path] = None):
-        """Load environment variables from a .env file"""
+        """Load environment variables from a .env file using python-dotenv"""
         if env_path is None:
             env_path = cls.PROJECT_ROOT / ".env"
+            if not env_path.exists():
+                env_path = cls.PROJECT_ROOT / "scripts" / ".env"
         
         if env_path.exists():
             print(f"Loading environment from {env_path}")
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    key, value = line.split("=", 1)
-                    value = value.split("#", 1)[0].strip()
-                    os.environ[key.strip()] = value
+            load_dotenv(env_path)
             
             # Update class attributes after loading env
             # Priority: LLM_ > DEEPSEEK_ > Default
@@ -61,7 +115,84 @@ class Config:
             cls.MAX_WORKERS = int(os.environ.get("MAX_WORKERS", cls.MAX_WORKERS))
             cls.MAX_TOKENS = int(os.environ.get("MAX_TOKENS", cls.MAX_TOKENS))
             cls.TIMEOUT = int(os.environ.get("TIMEOUT", cls.TIMEOUT))
+            cls.PERSIST_FULL_SESSIONS = _env_flag("PERSIST_FULL_SESSIONS", cls.PERSIST_FULL_SESSIONS)
+            cls.AUDIT_FIELD_MAX_CHARS = int(os.environ.get("AUDIT_FIELD_MAX_CHARS", cls.AUDIT_FIELD_MAX_CHARS))
+            cls.SESSION_MESSAGE_MAX_CHARS = int(
+                os.environ.get("SESSION_MESSAGE_MAX_CHARS", cls.SESSION_MESSAGE_MAX_CHARS)
+            )
+            cls.DEBUG_SENSITIVE_LOGGING = _env_flag(
+                "DEBUG_SENSITIVE_LOGGING",
+                cls.DEBUG_SENSITIVE_LOGGING,
+            )
+            cls.BERTOPIC_INTEGRITY_KEY = os.environ.get(
+                "BERTOPIC_INTEGRITY_KEY",
+                cls.BERTOPIC_INTEGRITY_KEY,
+            )
+            cls.BERTOPIC_PRIMARY_ENABLED = _env_flag(
+                "BERTOPIC_PRIMARY_ENABLED",
+                cls.BERTOPIC_PRIMARY_ENABLED,
+            )
+            cls.BERTOPIC_PRIMARY_MIN_SUPPORT = int(
+                os.environ.get("BERTOPIC_PRIMARY_MIN_SUPPORT", cls.BERTOPIC_PRIMARY_MIN_SUPPORT)
+            )
+            cls.BERTOPIC_PRIMARY_MIN_PURITY = float(
+                os.environ.get("BERTOPIC_PRIMARY_MIN_PURITY", cls.BERTOPIC_PRIMARY_MIN_PURITY)
+            )
+            cls.BERTOPIC_PRIMARY_MIN_PROB = float(
+                os.environ.get("BERTOPIC_PRIMARY_MIN_PROB", cls.BERTOPIC_PRIMARY_MIN_PROB)
+            )
+            cls.BERTOPIC_PRIMARY_MIN_MAPPED_SHARE = float(
+                os.environ.get(
+                    "BERTOPIC_PRIMARY_MIN_MAPPED_SHARE",
+                    cls.BERTOPIC_PRIMARY_MIN_MAPPED_SHARE,
+                )
+            )
+            cls.BERTOPIC_EMBEDDING_MODEL = os.environ.get(
+                "BERTOPIC_EMBEDDING_MODEL",
+                cls.BERTOPIC_EMBEDDING_MODEL,
+            )
+            cls.URBAN_HYBRID_LLM_ASSIST_ENABLED = _env_flag(
+                "URBAN_HYBRID_LLM_ASSIST_ENABLED",
+                cls.URBAN_HYBRID_LLM_ASSIST_ENABLED,
+            )
             
         # Ensure directories exist
         cls.SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
         cls.TRAIN_DIR.mkdir(parents=True, exist_ok=True)
+        cls.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        cls.MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def validate_runtime_environment(
+        cls,
+        *,
+        require_py313: bool = False,
+        warn_on_minor_drift: bool = False,
+        required_modules: Optional[Iterable[str]] = None,
+    ):
+        expected_runtime = cls.RECOMMENDED_PYTHON
+        current_runtime = f"{sys.version_info[0]}.{sys.version_info[1]}"
+        recommended_entry = f"Use scripts/main_py313.py or {cls.PY313_VENV_PYTHON}."
+
+        if sys.version_info[:2] >= (3, 14):
+            raise RuntimeError(
+                f"Python {current_runtime} is not supported by the project runtime. {recommended_entry}"
+            )
+
+        if require_py313 and sys.version_info[:2] != (3, 13):
+            message = (
+                f"Python {current_runtime} does not match the recommended runtime {expected_runtime}. "
+                f"{recommended_entry}"
+            )
+            if warn_on_minor_drift and sys.version_info[:2] < (3, 14):
+                print(f"[WARN] {message}")
+            else:
+                raise RuntimeError(message)
+
+        modules = tuple(required_modules or ("openai", "pandas", "openpyxl"))
+        missing = [name for name in modules if importlib.util.find_spec(name) is None]
+        if missing:
+            raise RuntimeError(
+                f"Missing required dependencies for runtime {current_runtime}: {', '.join(sorted(missing))}. "
+                f"{recommended_entry}"
+            )
