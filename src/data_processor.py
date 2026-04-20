@@ -8,6 +8,7 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config import Config, Schema
 from .llm_client import DeepSeekClient
+from .merged_output import build_review_ready_merged_frame, load_task_input_frame
 from .prompts import PromptGenerator
 from .strategies import StrategyRegistry, ExtractionStrategy
 
@@ -68,11 +69,13 @@ class DataProcessor:
         input_path = Path(input_file) if input_file else self.config.INPUT_FILE
         task_name = input_path.stem  # e.g., "test1" from "test1.xlsx"
 
-        # Define task directory structure: Data/{task_name}/
+        # Define task directory structure: Data/{task_name}/runs/{track}/{run_tag}/
         task_dir = self.config.DATA_DIR / task_name
-        output_dir = task_dir / "output"
-        labels_dir = task_dir / "labels"
-        result_dir = task_dir / "Result"
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        run_dir = task_dir / "runs" / "research_matrix" / timestamp
+        output_dir = run_dir / "predictions"
+        labels_dir = task_dir / "input" / "labels"
+        result_dir = run_dir / "reports"
         
         # Ensure directories exist
         for d in [output_dir, labels_dir, result_dir]:
@@ -88,7 +91,6 @@ class DataProcessor:
             print(f"Labels file already exists at: {label_file_path}")
 
         # Prepare output files and result containers for each strategy
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
         output_files = {}
         results_lists = {name: [] for name in self.strategy_names}
         
@@ -270,29 +272,26 @@ class DataProcessor:
 
             merged = pd.merge(
                 df_stepwise,
-                df_spatial[["_key", "空间研究/非空间研究", "空间等级", "具体空间描述", "Reasoning", "Confidence"]],
+                df_spatial[
+                    [
+                        "_key",
+                        Schema.IS_SPATIAL,
+                        Schema.SPATIAL_LEVEL,
+                        Schema.SPATIAL_DESC,
+                        "Reasoning",
+                        "Confidence",
+                    ]
+                ],
                 on="_key",
                 suffixes=("", "_spatial"),
                 how="left"
             )
-
-            final_cols = ["Article Title", "Abstract"]
-            if "是否属于城市更新研究" in merged.columns:
-                final_cols.append("是否属于城市更新研究")
-
-            spatial_cols = ["空间研究/非空间研究", "空间等级", "具体空间描述"]
-            for col in spatial_cols:
-                if f"{col}_spatial" in merged.columns:
-                    merged[col] = merged[f"{col}_spatial"]
-
-            for col in final_cols + spatial_cols + ["Reasoning", "Confidence"]:
-                if col in merged.columns and col not in final_cols:
-                    final_cols.append(col)
-
-            remaining = [c for c in merged.columns if c not in final_cols and c != "_key" and not c.endswith("_spatial")]
-            final_cols.extend(remaining)
-
-            merged = merged[final_cols]
+            input_df = None
+            for parent in stepwise_file.parents:
+                input_df = load_task_input_frame(parent)
+                if input_df is not None:
+                    break
+            merged = build_review_ready_merged_frame(merged, input_df=input_df)
 
             merge_output = stepwise_file.parent / f"merged_{timestamp}.xlsx"
             merged.to_excel(merge_output, index=False, engine="openpyxl")

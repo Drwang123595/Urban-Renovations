@@ -2,7 +2,18 @@ import os
 import re
 import time
 from typing import List, Dict, Any, Optional
-from openai import OpenAI, APIError, RateLimitError
+
+try:
+    from openai import OpenAI, APIError, RateLimitError
+except ImportError:
+    OpenAI = None
+
+    class APIError(Exception):
+        pass
+
+    class RateLimitError(Exception):
+        pass
+
 from .config import Config
 
 class DeepSeekClient:
@@ -17,12 +28,14 @@ class DeepSeekClient:
         
         if not self.api_key:
             print("Warning: API Key is not set. API calls will fail.")
-            
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url,
-            timeout=Config.TIMEOUT
-        )
+
+        self.client = None
+        if OpenAI is not None:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout=Config.TIMEOUT
+            )
 
     def _mask_secret(self, value: str) -> str:
         if not value:
@@ -113,6 +126,11 @@ class DeepSeekClient:
         """
         Call LLM API for chat completion using OpenAI SDK.
         """
+        if self.client is None:
+            raise RuntimeError(
+                "openai package is not installed. Install the project runtime first "
+                "with `python -m pip install -e .[dev]` in Python 3.13."
+            )
         for attempt in range(max_retries):
             try:
                 response = self.client.chat.completions.create(

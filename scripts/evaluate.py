@@ -10,7 +10,10 @@ from src.config import Config, Schema
 from src.evaluation_core import (
     align_truth_pred,
     evaluate_merged,
+    summarize_bootstrap_ci,
+    summarize_boundary_bucket_metrics,
     normalize_binary_value,
+    summarize_mcnemar,
     summarize_decision_source_metrics,
     summarize_chunked_binary_metrics,
     summarize_metrics,
@@ -18,14 +21,18 @@ from src.evaluation_core import (
     summarize_theme_family_metrics,
     summarize_theme_metrics,
     summarize_topic_final_distribution,
+    summarize_unknown_conflict_analysis,
     summarize_unknown_rate,
+    validate_accuracy_bounds,
 )
 from src.prompt_manifest import (
     build_comparability_signature,
+    build_long_context_group_signature,
     compare_manifests,
     load_prompt_manifest,
     manifest_path_for_output,
 )
+from src.urban_training_contract import allowed_training_workbooks, assert_training_source_contract
 
 
 GUARDRAIL_OUTPUT_COLUMNS = [
@@ -105,6 +112,10 @@ URBAN_ERROR_CATEGORY_RULES = [
     ),
 ]
 
+STRICT_TRUTH_TRACKS = {"stable_release", "research_matrix"}
+LONG_CONTEXT_ACCURACY_DELTA_THRESHOLD = 1.5
+LONG_CONTEXT_F1_DELTA_THRESHOLD = 0.015
+
 
 def list_tasks():
     tasks = []
@@ -136,7 +147,11 @@ def select_from_list(items, prompt="Select item:"):
             print("Please enter a number.")
 
 
-def resolve_truth_files(labels_dir: Path, truth_arg: str = None):
+def resolve_truth_files(
+    labels_dir: Path,
+    truth_arg: str = None,
+    experiment_track: str = "stable_release",
+):
     if truth_arg:
         truth_file = Path(truth_arg)
         if not truth_file.exists():
@@ -146,6 +161,10 @@ def resolve_truth_files(labels_dir: Path, truth_arg: str = None):
     truth_files = sorted(labels_dir.glob("*.xlsx"))
     if not truth_files:
         raise FileNotFoundError(f"No ground-truth files found: {labels_dir}")
+    if experiment_track in STRICT_TRUTH_TRACKS and len(truth_files) != 1:
+        raise ValueError(
+            f"{experiment_track} requires an explicit --truth when labels dir has {len(truth_files)} workbooks: {labels_dir}"
+        )
     return truth_files
 
 
@@ -153,9 +172,17 @@ def _tokenize_for_match(name: str):
     return {token for token in re.split(r"[^a-z0-9]+", name.lower()) if token}
 
 
-def resolve_truth_for_prediction(pred_file: Path, truth_files):
+def resolve_truth_for_prediction(
+    pred_file: Path,
+    truth_files,
+    experiment_track: str = "stable_release",
+):
     if len(truth_files) == 1:
         return truth_files[0], "single_truth"
+    if experiment_track in STRICT_TRUTH_TRACKS:
+        raise ValueError(
+            f"{experiment_track} forbids heuristic truth matching for {pred_file.name}. Pass --truth explicitly."
+        )
 
     pred_stem = pred_file.stem.lower()
     exact = [file_path for file_path in truth_files if file_path.stem.lower() == pred_stem]
@@ -276,6 +303,18 @@ def evaluate_one_file(
         alignment.merged,
         source_name=pred_file.stem,
     )
+    boundary_bucket_df = summarize_boundary_bucket_metrics(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
+    unknown_conflict_df = summarize_unknown_conflict_analysis(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
+    bootstrap_ci_df = summarize_bootstrap_ci(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
     guardrail_df = build_prediction_guardrails(
         df_pred,
         source_name=pred_file.stem,
@@ -296,10 +335,14 @@ def evaluate_one_file(
         unknown_rate_df.to_excel(writer, sheet_name="Unknown Rate", index=False)
         decision_source_df.to_excel(writer, sheet_name="Decision Source Metrics", index=False)
         topic_distribution_df.to_excel(writer, sheet_name="Topic Distribution", index=False)
+        boundary_bucket_df.to_excel(writer, sheet_name="Boundary Bucket Metrics", index=False)
+        unknown_conflict_df.to_excel(writer, sheet_name="Unknown Conflict Analysis", index=False)
+        bootstrap_ci_df.to_excel(writer, sheet_name="Bootstrap CI", index=False)
         chunk_metrics_df.to_excel(writer, sheet_name="Chunk Metrics", index=False)
         guardrail_df.to_excel(writer, sheet_name="Guardrails", index=False)
         urban_error_df.to_excel(writer, sheet_name="Urban Error Analysis", index=False)
     return (
+        alignment.merged,
         metrics_df,
         chunk_metrics_df,
         guardrail_df,
@@ -310,6 +353,9 @@ def evaluate_one_file(
         unknown_rate_df,
         decision_source_df,
         topic_distribution_df,
+        boundary_bucket_df,
+        unknown_conflict_df,
+        bootstrap_ci_df,
         report_path,
     )
 
@@ -467,14 +513,148 @@ def build_urban_error_analysis(
     return pd.DataFrame(rows).reindex(columns=URBAN_ERROR_OUTPUT_COLUMNS)
 
 
-def build_group_summaries(merged_metrics: pd.DataFrame, comparability_df: pd.DataFrame) -> pd.DataFrame:
+def build_protocol_df(args, pred_files, truth_files, report_dir: Path) -> pd.DataFrame:
+    rows = [
+        {"Field": "experiment_track", "Value": args.experiment_track},
+        {"Field": "pred_scope", "Value": args.pred_scope},
+        {"Field": "truth_binding_policy", "Value": "strict_explicit_or_unique" if args.experiment_track in STRICT_TRUTH_TRACKS else "legacy_heuristic_allowed"},
+        {"Field": "accuracy_scale", "Value": "0-100"},
+        {"Field": "precision_recall_f1_scale", "Value": "0-1"},
+        {"Field": "long_context_accuracy_delta_threshold", "Value": LONG_CONTEXT_ACCURACY_DELTA_THRESHOLD},
+        {"Field": "long_context_f1_delta_threshold", "Value": LONG_CONTEXT_F1_DELTA_THRESHOLD},
+        {
+            "Field": "required_summary_sheets",
+            "Value": "All Metrics;Run Metadata;Protocol;Comparability;Long Context Stability;Decision Source Metrics;Unknown Rate;Boundary Bucket Metrics;Unknown Conflict Analysis;Bootstrap CI;McNemar",
+        },
+        {
+            "Field": "training_sources",
+            "Value": ";".join(str(path.resolve()) for path in allowed_training_workbooks(Config.TRAIN_DIR)),
+        },
+        {"Field": "prediction_file_count", "Value": len(pred_files)},
+        {"Field": "truth_file_count", "Value": len(truth_files)},
+        {"Field": "report_dir", "Value": str(report_dir.resolve())},
+    ]
+    return pd.DataFrame(rows)
+
+
+def build_long_context_stability(
+    merged_metrics: pd.DataFrame,
+    merged_unknown_rates: pd.DataFrame,
+    run_metadata_df: pd.DataFrame,
+) -> pd.DataFrame:
+    columns = [
+        "Long Context Group Signature",
+        "Run Count",
+        "Orders",
+        "Mean Accuracy",
+        "Mean Precision",
+        "Mean Recall",
+        "Mean F1",
+        "Max Delta Accuracy",
+        "Max Delta F1",
+        "Unknown Min",
+        "Unknown Max",
+        "Unknown Range",
+        "Order Sensitive",
+        "Files",
+    ]
+    if merged_metrics.empty or run_metadata_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    metadata = run_metadata_df.copy()
+    if "session_policy" not in metadata.columns:
+        return pd.DataFrame(columns=columns)
+
+    metadata = metadata[
+        metadata["session_policy"].fillna("") == "cross_paper_long_context"
+    ].copy()
+    if metadata.empty:
+        return pd.DataFrame(columns=columns)
+    metadata["prediction_stem"] = metadata["prediction_file"].apply(lambda value: Path(str(value)).stem)
+
+    urban_metrics = merged_metrics[merged_metrics["Metric"] == "Urban Renewal"].copy()
+    if urban_metrics.empty:
+        return pd.DataFrame(columns=columns)
+
+    merged = urban_metrics.merge(
+        metadata[["prediction_stem", "prediction_file", "long_context_group_signature", "order_id"]],
+        left_on="File",
+        right_on="prediction_stem",
+        how="inner",
+    )
+    if merged.empty:
+        return pd.DataFrame(columns=columns)
+
+    unknown_df = merged_unknown_rates.copy() if not merged_unknown_rates.empty else pd.DataFrame()
+    if not unknown_df.empty:
+        unknown_df = unknown_df.merge(
+            metadata[["prediction_stem", "prediction_file", "long_context_group_signature"]],
+            left_on="File",
+            right_on="prediction_stem",
+            how="inner",
+        )
+
+    rows = []
+    for signature, frame in merged.groupby("long_context_group_signature"):
+        accuracy_values = pd.to_numeric(frame["Accuracy"], errors="coerce").dropna()
+        f1_values = pd.to_numeric(frame["F1"], errors="coerce").dropna()
+        precision_values = pd.to_numeric(frame["Precision"], errors="coerce").dropna()
+        recall_values = pd.to_numeric(frame["Recall"], errors="coerce").dropna()
+        unknown_values = pd.Series(dtype=float)
+        if not unknown_df.empty:
+            unknown_values = pd.to_numeric(
+                unknown_df[unknown_df["long_context_group_signature"] == signature]["Predicted Unknown Count"],
+                errors="coerce",
+            ).dropna()
+        max_delta_accuracy = float(accuracy_values.max() - accuracy_values.min()) if not accuracy_values.empty else 0.0
+        max_delta_f1 = float(f1_values.max() - f1_values.min()) if not f1_values.empty else 0.0
+        rows.append(
+            {
+                "Long Context Group Signature": signature,
+                "Run Count": int(len(frame)),
+                "Orders": ", ".join(sorted({str(value) for value in frame["order_id"].dropna().tolist()})),
+                "Mean Accuracy": float(accuracy_values.mean()) if not accuracy_values.empty else pd.NA,
+                "Mean Precision": float(precision_values.mean()) if not precision_values.empty else pd.NA,
+                "Mean Recall": float(recall_values.mean()) if not recall_values.empty else pd.NA,
+                "Mean F1": float(f1_values.mean()) if not f1_values.empty else pd.NA,
+                "Max Delta Accuracy": max_delta_accuracy,
+                "Max Delta F1": max_delta_f1,
+                "Unknown Min": float(unknown_values.min()) if not unknown_values.empty else pd.NA,
+                "Unknown Max": float(unknown_values.max()) if not unknown_values.empty else pd.NA,
+                "Unknown Range": float(unknown_values.max() - unknown_values.min()) if not unknown_values.empty else pd.NA,
+                "Order Sensitive": bool(
+                    max_delta_accuracy > LONG_CONTEXT_ACCURACY_DELTA_THRESHOLD
+                    or max_delta_f1 > LONG_CONTEXT_F1_DELTA_THRESHOLD
+                ),
+                "Files": ", ".join(sorted(frame["File"].astype(str).tolist())),
+            }
+        )
+
+    return pd.DataFrame(rows, columns=columns)
+
+
+def build_group_summaries(
+    merged_metrics: pd.DataFrame,
+    comparability_df: pd.DataFrame,
+    run_metadata_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     if merged_metrics.empty or comparability_df.empty:
         return pd.DataFrame()
 
-    signature_map = comparability_df.set_index("prediction_file")["comparability_signature"].to_dict()
+    excluded_files = set()
+    if run_metadata_df is not None and not run_metadata_df.empty and "session_policy" in run_metadata_df.columns:
+        excluded_files = {
+            str(value)
+            for value in run_metadata_df[
+                run_metadata_df["session_policy"].fillna("") == "cross_paper_long_context"
+            ]["prediction_file"].tolist()
+        }
+
     grouped_frames = []
     for signature, files in comparability_df.groupby("comparability_signature"):
-        file_names = set(files["prediction_file"].tolist())
+        file_names = set(files["prediction_file"].tolist()) - excluded_files
+        if not file_names:
+            continue
         subset = merged_metrics[merged_metrics["File"].isin({Path(name).stem for name in file_names})].copy()
         if subset.empty:
             continue
@@ -490,6 +670,13 @@ def build_group_summaries(merged_metrics: pd.DataFrame, comparability_df: pd.Dat
 def parse_args():
     parser = argparse.ArgumentParser(description="Offline evaluator for prediction files against ground truth")
     parser.add_argument("--task", type=str, default=None, help="Task folder under Data/, e.g. test1")
+    parser.add_argument(
+        "--experiment-track",
+        type=str,
+        default="stable_release",
+        choices=list(Config.EXPERIMENT_TRACKS),
+        help="Experiment governance track controlling truth binding strictness",
+    )
     parser.add_argument("--truth", type=str, default=None, help="Ground-truth xlsx path")
     parser.add_argument("--pred", type=str, default=None, help="Single prediction xlsx path")
     parser.add_argument("--pred-dir", type=str, default=None, help="Prediction directory path")
@@ -517,6 +704,7 @@ def parse_args():
 def evaluate():
     Config.load_env()
     args = parse_args()
+    assert_training_source_contract(allowed_training_workbooks(Config.TRAIN_DIR))
 
     task_dir = None
     if args.task:
@@ -541,7 +729,7 @@ def evaluate():
         default_report_dir = Path("Result")
 
     pred_files = collect_pred_files(args.pred, args.pred_dir, default_output_dir, args.pred_scope)
-    truth_files = resolve_truth_files(labels_dir, args.truth)
+    truth_files = resolve_truth_files(labels_dir, args.truth, experiment_track=args.experiment_track)
 
     report_dir = Path(args.report_dir) if args.report_dir else default_report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -564,16 +752,25 @@ def evaluate():
     all_unknown_rates = []
     all_decision_source_metrics = []
     all_topic_distributions = []
+    all_boundary_bucket_metrics = []
+    all_unknown_conflict_metrics = []
+    all_bootstrap_ci = []
+    aligned_frames = {}
     truth_cache = {}
     truth_match_rows = []
     comparability_rows = []
+    run_metadata_rows = []
     strict_modes = {"single_truth", "exact_stem_match", "contains_match"}
 
     baseline_manifest = None
     baseline_truth_file = None
 
     for pred_file in pred_files:
-        truth_file, match_mode = resolve_truth_for_prediction(pred_file, truth_files)
+        truth_file, match_mode = resolve_truth_for_prediction(
+            pred_file,
+            truth_files,
+            experiment_track=args.experiment_track,
+        )
         if args.strict_truth_match and match_mode not in strict_modes:
             raise ValueError(
                 f"Truth matching is not strict enough: pred={pred_file.name}, truth={truth_file.name}, mode={match_mode}. "
@@ -587,6 +784,7 @@ def evaluate():
         print(f"Matched truth: {truth_file.name} ({match_mode})")
 
         (
+            aligned_merged_df,
             metrics_df,
             chunk_metrics_df,
             guardrail_df,
@@ -597,6 +795,9 @@ def evaluate():
             unknown_rate_df,
             decision_source_df,
             topic_distribution_df,
+            boundary_bucket_df,
+            unknown_conflict_df,
+            bootstrap_ci_df,
             report_path,
         ) = evaluate_one_file(
             truth_df=truth_df,
@@ -617,6 +818,10 @@ def evaluate():
         all_unknown_rates.append(unknown_rate_df)
         all_decision_source_metrics.append(decision_source_df)
         all_topic_distributions.append(topic_distribution_df)
+        all_boundary_bucket_metrics.append(boundary_bucket_df)
+        all_unknown_conflict_metrics.append(unknown_conflict_df)
+        all_bootstrap_ci.append(bootstrap_ci_df)
+        aligned_frames[pred_file.stem] = aligned_merged_df
         truth_match_rows.append(
             {
                 "prediction_file": pred_file.name,
@@ -628,6 +833,7 @@ def evaluate():
         manifest = load_prompt_manifest(pred_file)
         manifest_file = manifest_path_for_output(pred_file)
         signature = build_comparability_signature(manifest, truth_file)
+        long_context_signature = build_long_context_group_signature(manifest, truth_file)
         if baseline_manifest is None:
             baseline_manifest = manifest
             baseline_truth_file = truth_file
@@ -652,6 +858,32 @@ def evaluate():
                 "comparability_signature": signature,
                 "comparable_with_first": comparable,
                 "comparability_issues": ";".join(mismatches),
+            }
+        )
+        runtime = (manifest or {}).get("runtime") or {}
+        experiment = (manifest or {}).get("experiment") or {}
+        run_metadata_rows.append(
+            {
+                "prediction_file": pred_file.name,
+                "prediction_stem": pred_file.stem,
+                "truth_file": str(truth_file.resolve()),
+                "truth_match_mode": match_mode,
+                "manifest_found": manifest is not None,
+                "manifest_path": str(manifest_file.resolve()),
+                "entrypoint": runtime.get("entrypoint", ""),
+                "runtime_python": runtime.get("python_version", ""),
+                "task_mode": manifest.get("task_mode") if manifest else "",
+                "experiment_track": experiment.get("experiment_track", args.experiment_track),
+                "dataset_id": experiment.get("dataset_id", ""),
+                "session_policy": experiment.get("session_policy", ""),
+                "order_id": experiment.get("order_id", ""),
+                "order_seed": experiment.get("order_seed", ""),
+                "max_samples_per_window": experiment.get("max_samples_per_window", ""),
+                "pred_scope": experiment.get("pred_scope", args.pred_scope),
+                "urban_method": experiment.get("urban_method", ""),
+                "hybrid_llm_assist_enabled": experiment.get("hybrid_llm_assist_enabled", ""),
+                "comparability_signature": signature,
+                "long_context_group_signature": long_context_signature,
             }
         )
 
@@ -691,25 +923,55 @@ def evaluate():
     merged_topic_distributions = (
         pd.concat(all_topic_distributions, ignore_index=True) if all_topic_distributions else pd.DataFrame()
     )
+    merged_boundary_bucket_metrics = (
+        pd.concat(all_boundary_bucket_metrics, ignore_index=True) if all_boundary_bucket_metrics else pd.DataFrame()
+    )
+    merged_unknown_conflicts = (
+        pd.concat(all_unknown_conflict_metrics, ignore_index=True) if all_unknown_conflict_metrics else pd.DataFrame()
+    )
+    merged_bootstrap_ci = (
+        pd.concat(all_bootstrap_ci, ignore_index=True) if all_bootstrap_ci else pd.DataFrame()
+    )
+    run_metadata_df = pd.DataFrame(run_metadata_rows)
 
     all_comparable = comparability_df.empty or comparability_df["comparable_with_first"].all()
     summary_df = summarize_metrics(merged_metrics) if all_comparable else pd.DataFrame()
-    group_summary_df = build_group_summaries(merged_metrics, comparability_df)
+    if not merged_metrics.empty:
+        validate_accuracy_bounds(merged_metrics, context="merged_metrics")
+    if not summary_df.empty:
+        validate_accuracy_bounds(summary_df, context="global_summary")
+    group_summary_df = build_group_summaries(merged_metrics, comparability_df, run_metadata_df=run_metadata_df)
+    if not group_summary_df.empty:
+        validate_accuracy_bounds(group_summary_df, context="group_summary")
+    protocol_df = build_protocol_df(args, pred_files, truth_files, report_dir)
+    long_context_stability_df = build_long_context_stability(
+        merged_metrics,
+        merged_unknown_rates,
+        run_metadata_df,
+    )
+    mcnemar_df = summarize_mcnemar(aligned_frames)
 
     if not merged_metrics.empty:
         summary_path = report_dir / "Eval_Summary.xlsx"
         with pd.ExcelWriter(summary_path, engine="openpyxl") as writer:
             merged_metrics.to_excel(writer, sheet_name="All Metrics", index=False)
+            run_metadata_df.to_excel(writer, sheet_name="Run Metadata", index=False)
+            protocol_df.to_excel(writer, sheet_name="Protocol", index=False)
             if not summary_df.empty:
                 summary_df.to_excel(writer, sheet_name="Global Summary", index=False)
             if not group_summary_df.empty:
                 group_summary_df.to_excel(writer, sheet_name="Group Summary", index=False)
+            long_context_stability_df.to_excel(writer, sheet_name="Long Context Stability", index=False)
             merged_theme_metrics.to_excel(writer, sheet_name="Theme Metrics", index=False)
             merged_theme_confusion.to_excel(writer, sheet_name="Theme Confusion", index=False)
             merged_theme_family.to_excel(writer, sheet_name="U-N Family Metrics", index=False)
             merged_unknown_rates.to_excel(writer, sheet_name="Unknown Rate", index=False)
             merged_decision_source_metrics.to_excel(writer, sheet_name="Decision Source Metrics", index=False)
             merged_topic_distributions.to_excel(writer, sheet_name="Topic Distribution", index=False)
+            merged_boundary_bucket_metrics.to_excel(writer, sheet_name="Boundary Bucket Metrics", index=False)
+            merged_unknown_conflicts.to_excel(writer, sheet_name="Unknown Conflict Analysis", index=False)
+            merged_bootstrap_ci.to_excel(writer, sheet_name="Bootstrap CI", index=False)
+            mcnemar_df.to_excel(writer, sheet_name="McNemar", index=False)
             merged_chunk_metrics.to_excel(writer, sheet_name="Chunk Metrics", index=False)
             merged_guardrails.to_excel(writer, sheet_name="Guardrails", index=False)
             merged_urban_errors.to_excel(writer, sheet_name="Urban Error Analysis", index=False)

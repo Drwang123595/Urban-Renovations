@@ -1,10 +1,46 @@
+# Urban Renovation Conda dependency list
+# Python version: 3.13.x only
+# Recommended Conda spec: python=3.13
+# Do not use Python 3.12 or 3.14 for this project.
+#
+# Suggested manual setup:
+#   conda create -n urban_renovation python=3.13 pip
+#   conda activate urban_renovation
+#   python -m pip install -r requirements.txt
+#
+# Important:
+#   Conda is used to manage the Python runtime and the environment itself.
+#   Install project packages with pip inside that Conda env.
+#   On this machine, Conda NumPy/BLAS builds caused Python to crash on import.
+
+# Core runtime
 pandas>=2.0.0
+numpy>=1.26.0
 openpyxl>=3.1.0
-requests>=2.31.0
 tqdm>=4.66.0
-PyYAML>=6.0
-python-docx>=0.8.11
-openai>=1.0.0
+pyyaml>=6.0
 python-dotenv>=1.0.0
-Jinja2>=3.0.0
-Jinja2>=3.0.0
+openai>=1.0.0
+requests>=2.31.0
+jinja2>=3.1.0
+
+# BERTopic / topic discovery stack
+bertopic>=0.16.0
+sentence-transformers>=3.0.0
+umap-learn>=0.5.7
+hdbscan>=0.8.40
+scikit-learn>=1.5.0
+
+# Report and visualization tools
+matplotlib>=3.8.0
+seaborn>=0.13.0
+pillow>=10.0.0
+pymupdf>=1.24.0
+reportlab>=4.0.0
+python-docx>=1.1.0
+
+# Test / development tools
+pytest>=7.0.0
+black>=24.0.0
+isort>=5.13.0
+flake8>=7.0.0

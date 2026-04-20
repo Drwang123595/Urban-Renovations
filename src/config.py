@@ -7,6 +7,8 @@ from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 
+from .project_paths import DEFAULT_STABLE_DATASET_ID, dataset_paths, data_root
+
 
 def _env_flag(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
@@ -45,13 +47,27 @@ class Config:
     )
     
     # Data Paths
-    DATA_DIR = PROJECT_ROOT / "data"
-    if (PROJECT_ROOT / "Data").exists() and not DATA_DIR.exists():
-        DATA_DIR = PROJECT_ROOT / "Data"
+    DATA_DIR = data_root(PROJECT_ROOT)
     TRAIN_DIR = DATA_DIR / "train"
+    EXPERIMENT_TRACKS = ("stable_release", "research_matrix", "legacy_archive")
+    STABLE_RELEASE_DATASET_ID = DEFAULT_STABLE_DATASET_ID
+    LEGACY_BASELINE_DATASET_ID = "test1-test7_merged"
+    STABLE_RELEASE_TASK_DIR = DATA_DIR / STABLE_RELEASE_DATASET_ID
+    LEGACY_BASELINE_TASK_DIR = DATA_DIR / LEGACY_BASELINE_DATASET_ID
+    STABLE_RELEASE_INPUT_DIR = dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).input_dir
+    STABLE_RELEASE_LABELS_DIR = dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).labels_dir
+    STABLE_RELEASE_LEGACY_LABELS_DIR = dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).legacy_labels_dir
+    STABLE_RELEASE_RUNS_DIR = dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).runs_dir
+    STABLE_RELEASE_LABEL_FILE = (
+        dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).label_file
+    )
+    STABLE_RELEASE_RESULT_DIR = STABLE_RELEASE_RUNS_DIR / "stable_release" / "20260417_unknown_recovery" / "reports"
+    STABLE_RELEASE_OUTPUT_DIR = STABLE_RELEASE_RUNS_DIR / "stable_release" / "20260417_unknown_recovery" / "predictions"
     OUTPUT_DIR = PROJECT_ROOT / "output"
     MODELS_DIR = OUTPUT_DIR / "models"
     BERTOPIC_ARTIFACT_DIR = MODELS_DIR / "urban_bertopic_online_py313"
+    URBAN_FAMILY_GATE_MODEL_PATH = MODELS_DIR / "urban_family_gate.joblib"
+    URBAN_FAMILY_GATE_BOUNDARY_PACKAGE_PATH = OUTPUT_DIR / "doc" / "urban_family_gate_boundary_package.xlsx"
     PY313_VENV_PYTHON = PROJECT_ROOT / ".venv-bertopic313" / "Scripts" / "python.exe"
     
     INPUT_FILE = TRAIN_DIR / "test1.xlsx" # Updated default
@@ -87,6 +103,10 @@ class Config:
     )
     BERTOPIC_EMBEDDING_MODEL = os.environ.get("BERTOPIC_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
     URBAN_HYBRID_LLM_ASSIST_ENABLED = _env_flag("URBAN_HYBRID_LLM_ASSIST_ENABLED", True)
+    URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED = _env_flag("URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED", True)
+    URBAN_FAMILY_GATE_ENABLED = _env_flag("URBAN_FAMILY_GATE_ENABLED", True)
+    URBAN_FAMILY_GATE_THRESHOLD_URBAN = float(os.environ.get("URBAN_FAMILY_GATE_THRESHOLD_URBAN", 0.72))
+    URBAN_FAMILY_GATE_THRESHOLD_NONURBAN = float(os.environ.get("URBAN_FAMILY_GATE_THRESHOLD_NONURBAN", 0.28))
     RECOMMENDED_PYTHON = "3.13"
     
     # Context Limits
@@ -155,6 +175,26 @@ class Config:
                 "URBAN_HYBRID_LLM_ASSIST_ENABLED",
                 cls.URBAN_HYBRID_LLM_ASSIST_ENABLED,
             )
+            cls.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED = _env_flag(
+                "URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED",
+                cls.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED,
+            )
+            cls.URBAN_FAMILY_GATE_ENABLED = _env_flag(
+                "URBAN_FAMILY_GATE_ENABLED",
+                cls.URBAN_FAMILY_GATE_ENABLED,
+            )
+            cls.URBAN_FAMILY_GATE_THRESHOLD_URBAN = float(
+                os.environ.get(
+                    "URBAN_FAMILY_GATE_THRESHOLD_URBAN",
+                    cls.URBAN_FAMILY_GATE_THRESHOLD_URBAN,
+                )
+            )
+            cls.URBAN_FAMILY_GATE_THRESHOLD_NONURBAN = float(
+                os.environ.get(
+                    "URBAN_FAMILY_GATE_THRESHOLD_NONURBAN",
+                    cls.URBAN_FAMILY_GATE_THRESHOLD_NONURBAN,
+                )
+            )
             
         # Ensure directories exist
         cls.SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -196,3 +236,17 @@ class Config:
                 f"Missing required dependencies for runtime {current_runtime}: {', '.join(sorted(missing))}. "
                 f"{recommended_entry}"
             )
+
+        if "pandas" in modules:
+            try:
+                import pandas as pd  # type: ignore
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to import pandas in runtime {current_runtime}. {recommended_entry}"
+                ) from exc
+            if not hasattr(pd, "DataFrame"):
+                raise RuntimeError(
+                    "Detected a broken pandas installation (imported module has no pandas.DataFrame). "
+                    "Reinstall pandas in the active environment. "
+                    f"{recommended_entry}"
+                )
