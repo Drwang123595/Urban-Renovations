@@ -115,7 +115,7 @@ def test_stable_pipeline_gate_thresholds_match_locked_release():
 
 def test_readme_locks_current_stable_release():
     readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "Current project contract as of 2026-04-17" in readme
+    assert "截至 2026-04-17，本项目的稳定版合同如下" in readme
     assert "Data/<dataset_id>/runs/<track>/<tag>/..." in readme
     assert "scripts/pipeline/run_stable_release.py" in readme
     assert "three_stage_hybrid --hybrid-llm-assist on" in readme
@@ -126,7 +126,7 @@ def test_readme_locks_current_stable_release():
 
 def test_stable_release_doc_records_thresholds_and_artifacts():
     doc_text = (PROJECT_ROOT / "doc" / "evaluation_baseline_20260408.md").read_text(encoding="utf-8")
-    assert "stable release as of 2026-04-17" in doc_text
+    assert "截至 2026-04-17 的当前性能最优稳定版" in doc_text
     assert "runs/stable_release/20260417_unknown_recovery" in doc_text
     assert "Data/<dataset_id>/input/labels/<dataset_id>.xlsx" in doc_text
     assert "Precision >= 0.956" in doc_text
