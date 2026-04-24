@@ -2,9 +2,9 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
 import re
-from ..llm_client import DeepSeekClient
-from ..prompts import PromptGenerator
-from ..memory import ConversationMemory
+from ..prompting.generator import PromptGenerator
+from ..runtime.llm_client import DeepSeekClient
+from ..runtime.memory import ConversationMemory
 
 class ExtractionStrategy(ABC):
     def __init__(self, client: DeepSeekClient, prompt_gen: PromptGenerator):
