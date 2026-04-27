@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 import pandas as pd
@@ -47,6 +48,16 @@ STABLE_UNKNOWN_REVIEW_FILE = (
 STABLE_FILE_STEM = f"urban_renewal_three_stage_hybrid_few_llm_on_{DEFAULT_TAG}"
 
 
+def _dependency_names(requirements):
+    names = set()
+    for requirement in requirements:
+        normalized = requirement.lower()
+        for separator in [">=", "==", "<=", "~=", ">", "<"]:
+            normalized = normalized.split(separator, 1)[0]
+        names.add(normalized.strip())
+    return names
+
+
 def test_stable_pipeline_entry_locks_paths_and_command():
     paths = build_paths()
     assert paths.dataset_id == DEFAULT_DATASET_ID
@@ -85,15 +96,15 @@ def test_stable_pipeline_gate_thresholds_match_locked_release():
         "model_name": "deepseek-v4-flash",
         "rows": 1000,
         "total": 1000,
-        "accuracy": 88.0,
-        "precision": 0.956743,
-        "recall": 0.94,
-        "f1": 0.948298,
-        "fp": 34,
-        "fn": 48,
+        "accuracy": 92.2,
+        "precision": 0.9599,
+        "recall": 0.94335,
+        "f1": 0.951553,
+        "fp": 32,
+        "fn": 46,
         "predicted_unknown_count": 38,
         "predicted_unknown_rate": 0.038,
-        "unknown_hint_resolution_accuracy": 92.9293,
+        "unknown_hint_resolution_accuracy": 94.8980,
         "llm_used_sum": 0,
         "explanation_coverage": 1.0,
         "rule_stack_coverage": 1.0,
@@ -122,8 +133,22 @@ def test_readme_locks_current_stable_release():
     assert "three_stage_hybrid --hybrid-llm-assist on" in readme
     assert f"runs/stable_release/{DEFAULT_TAG}" in readme
     assert "deepseek-v4-flash" in readme
-    assert "Precision = 0.956743" in readme
+    assert "Accuracy = 92.2" in readme
+    assert "Precision = 0.959900" in readme
+    assert "F1 = 0.951553" in readme
+    assert "FP = 32" in readme
+    assert "FN = 46" in readme
     assert "Predicted Unknown Count = 38" in readme
+    assert "unknown_hint_resolution Accuracy = 94.8980" in readme
+
+
+def test_report_dependencies_are_declared_in_recommended_install_targets():
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = pyproject["project"]["optional-dependencies"]
+    required = {"pymupdf", "matplotlib", "seaborn", "reportlab", "pillow"}
+
+    assert required.issubset(_dependency_names(extras["report"]))
+    assert required.issubset(_dependency_names(extras["dev"]))
 
 
 def test_stable_release_doc_records_thresholds_and_artifacts():
@@ -132,6 +157,7 @@ def test_stable_release_doc_records_thresholds_and_artifacts():
     assert f"runs/stable_release/{DEFAULT_TAG}" in doc_text
     assert "Data/<dataset_id>/input/labels/<dataset_id>.xlsx" in doc_text
     assert "deepseek-v4-flash" in doc_text
+    assert "| `three_stage_hybrid + LLM on` | 92.2% | 0.959900 | 0.943350 | 0.951553 | 766 | 156 | 32 | 46 | 38 |" in doc_text
     assert "Precision >= 0.956" in doc_text
     assert "Recall >= 0.940" in doc_text
     assert "unknown_hint_resolution" in doc_text

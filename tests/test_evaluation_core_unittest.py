@@ -87,6 +87,37 @@ class EvaluationCoreTests(unittest.TestCase):
         self.assertAlmostEqual(float(urban["Recall"]), 0.5, places=6)
         self.assertAlmostEqual(float(urban["F1"]), 0.5, places=6)
 
+    def test_missing_non_target_fields_are_skipped_not_zero_score(self):
+        truth_df = pd.DataFrame(
+            {
+                Schema.TITLE: ["A", "B"],
+                Schema.IS_URBAN_RENEWAL: [1, 0],
+            }
+        )
+        pred_df = pd.DataFrame(
+            {
+                Schema.TITLE: ["A", "B"],
+                Schema.IS_URBAN_RENEWAL: [1, 0],
+            }
+        )
+
+        aligned = align_truth_pred(truth_df, pred_df, strict=True)
+        metrics_df, detail_df = evaluate_merged(aligned.merged, "urban_only")
+
+        skipped = metrics_df[metrics_df["Metric"].isin(["Spatial Study", "Spatial Level", "Spatial Desc"])]
+        self.assertEqual(set(skipped["Total"]), {0})
+        self.assertEqual(set(skipped["Correct"]), {0})
+        self.assertTrue(skipped["Accuracy"].isna().all())
+        self.assertTrue(skipped["Precision"].isna().all())
+        self.assertTrue(detail_df["Diff_Spatial Study"].isna().all())
+        self.assertTrue(detail_df["Diff_Spatial Level"].isna().all())
+        self.assertTrue(detail_df["Diff_Spatial Desc"].isna().all())
+
+        summary = summarize_metrics(metrics_df)
+        spatial_summary = summary[summary["Metric"] == "Spatial Study"].iloc[0]
+        self.assertEqual(int(spatial_summary["Total"]), 0)
+        self.assertTrue(pd.isna(spatial_summary["Accuracy"]))
+
     def test_global_summary(self):
         raw = pd.DataFrame(
             [

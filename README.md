@@ -100,14 +100,14 @@ Locked performance-optimal stable release:
 
 Stable release metrics:
 
-- `Accuracy = 88.0`
-- `Precision = 0.956743`
-- `Recall = 0.940000`
-- `F1 = 0.948298`
-- `FP = 34`
-- `FN = 48`
+- `Accuracy = 92.2`
+- `Precision = 0.959900`
+- `Recall = 0.943350`
+- `F1 = 0.951553`
+- `FP = 32`
+- `FN = 46`
 - `Predicted Unknown Count = 38`
-- `unknown_hint_resolution Accuracy = 92.9293`
+- `unknown_hint_resolution Accuracy = 94.8980`
 - `llm_attempted = 137`
 - `llm_used = 0`
 

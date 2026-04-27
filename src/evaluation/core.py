@@ -581,9 +581,9 @@ def evaluate_merged(
         missing_pair = truth_col is None or pred_col is None
 
         if missing_pair:
-            condition = pd.Series(False, index=merged.index)
+            condition = pd.Series(pd.NA, index=merged.index, dtype="object")
             tp, tn, fp, fn = 0, 0, 0, 0
-            precision, recall, f1 = (0.0, 0.0, 0.0) if is_binary else (np.nan, np.nan, np.nan)
+            precision, recall, f1 = np.nan, np.nan, np.nan
         elif is_binary:
             truth_norm = merged[truth_col].apply(normalize_binary_value)
             pred_norm = merged[pred_col].apply(normalize_binary_value)
@@ -611,16 +611,22 @@ def evaluate_merged(
             precision, recall, f1 = np.nan, np.nan, np.nan
 
         diff_col = f"Diff_{metric_name}"
-        merged[diff_col] = np.where(condition, 1, 0)
-        correct = int(merged[diff_col].sum())
-        total = len(merged)
-        accuracy = (correct / total * 100.0) if total else 0.0
+        if missing_pair:
+            merged[diff_col] = np.nan
+            correct = 0
+            total = 0
+            accuracy = np.nan
+        else:
+            merged[diff_col] = np.where(condition, 1, 0)
+            correct = int(merged[diff_col].sum())
+            total = len(merged)
+            accuracy = (correct / total * 100.0) if total else np.nan
 
         metrics.append(
             {
                 "File": source_name,
                 "Metric": metric_name,
-                "Accuracy": round(accuracy, 4),
+                "Accuracy": round(accuracy, 4) if not np.isnan(accuracy) else np.nan,
                 "Correct": correct,
                 "Total": total,
                 "TP": int(tp),
@@ -756,7 +762,7 @@ def summarize_metrics(all_metrics: pd.DataFrame) -> pd.DataFrame:
     for metric_name, group in all_metrics.groupby("Metric"):
         total = group["Total"].sum()
         correct = group["Correct"].sum()
-        accuracy = (correct / total * 100.0) if total else 0.0
+        accuracy = (correct / total * 100.0) if total else np.nan
 
         tp = group["TP"].sum()
         fp = group["FP"].sum()
@@ -775,7 +781,7 @@ def summarize_metrics(all_metrics: pd.DataFrame) -> pd.DataFrame:
             {
                 "File": "__GLOBAL__",
                 "Metric": metric_name,
-                "Accuracy": round(accuracy, 4),
+                "Accuracy": round(accuracy, 4) if not np.isnan(accuracy) else np.nan,
                 "Correct": int(correct),
                 "Total": int(total),
                 "TP": int(tp),

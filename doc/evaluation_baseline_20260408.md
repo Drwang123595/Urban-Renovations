@@ -69,16 +69,21 @@ Urban Renewal metrics for the stable release:
 
 | Run | Accuracy | Precision | Recall | F1 | TP | TN | FP | FN | Unknown |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `three_stage_hybrid + LLM on` | 88.0% | 0.956743 | 0.940000 | 0.948298 | 752 | 128 | 34 | 48 | 38 |
+| `three_stage_hybrid + LLM on` | 92.2% | 0.959900 | 0.943350 | 0.951553 | 766 | 156 | 32 | 46 | 38 |
 
 Unknown recovery diagnostics for the stable release:
 
 | Decision source | Total | Accuracy | Precision | Recall | F1 |
 |---|---:|---:|---:|---:|---:|
-| `rule_model_fusion` | 846 | 91.1348 | 0.960452 | 0.935351 | 0.947735 |
+| `anchor_guard_promotion` | 5 | 100.0000 | 1.000000 | 1.000000 | 1.000000 |
+| `anchor_guard_review` | 1 | 0.0000 | 0.000000 | 0.000000 | 0.000000 |
+| `open_set_recovery` | 6 | 100.0000 | 1.000000 | 1.000000 | 1.000000 |
+| `rule_model_fusion` | 770 | 94.8052 | 0.960452 | 0.982659 | 0.971429 |
 | `stage1_rule` | 17 | 100.0000 | 0.000000 | 0.000000 | 0.000000 |
-| `unknown_hint_resolution` | 99 | 92.9293 | 0.923077 | 0.986301 | 0.953642 |
-| `unknown_review` | 38 | 0.0000 | 0.000000 | 0.000000 | 0.000000 |
+| `uncertain_nonurban_promotion` | 4 | 75.0000 | 0.750000 | 1.000000 | 0.857143 |
+| `uncertain_nonurban_review` | 61 | 65.5738 | 0.000000 | 0.000000 | 0.000000 |
+| `unknown_hint_resolution` | 98 | 94.8980 | 0.960000 | 0.972973 | 0.966443 |
+| `unknown_review` | 38 | 73.6842 | 0.000000 | 0.000000 | 0.000000 |
 
 Reference comparison baselines:
 
