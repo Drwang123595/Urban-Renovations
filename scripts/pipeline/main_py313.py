@@ -842,16 +842,7 @@ def run_selected_task(router: TaskRouter, args, run_context: dict) -> dict:
     return result
 
 
-def main():
-    Config.load_env()
-    Config.validate_runtime_environment(require_py313=True, warn_on_minor_drift=True)
-
-    try:
-        strategy_registry = load_prompt_strategy_registry()
-    except Exception as exc:
-        print(f"Error: failed to load strategy registry: {exc}")
-        return
-
+def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Urban Renovation Literature Auto-Identification System"
     )
@@ -916,8 +907,14 @@ def main():
         action="store_true",
         help="Run in batch mode without interactive prompts",
     )
+    return parser
 
-    args = parser.parse_args()
+
+def parse_args():
+    return build_argument_parser().parse_args()
+
+
+def prepare_experiment_args(args) -> None:
     preset_input = args.input or default_train_input()
     explicit_track = args.experiment_track
     args.experiment_track = infer_experiment_track(explicit_track, preset_input)
@@ -928,6 +925,8 @@ def main():
     if args.max_samples_per_window <= 0:
         raise ValueError("--max-samples-per-window must be positive")
 
+
+def load_selectable_modes(strategy_registry: PromptStrategyRegistry, args) -> tuple[list[str], list[str]]:
     urban_enabled = get_enabled_shot_modes(
         strategy_registry,
         theme="urban_renewal",
@@ -939,24 +938,24 @@ def main():
         allow_candidate=args.allow_candidate,
     )
     if not urban_enabled:
-        print("Error: no selectable urban_renewal strategies in registry.")
-        return
+        raise ValueError("no selectable urban_renewal strategies in registry.")
     if not spatial_enabled:
-        print("Error: no selectable spatial strategies in registry.")
-        return
+        raise ValueError("no selectable spatial strategies in registry.")
+    return urban_enabled, spatial_enabled
 
-    print_startup_overview(urban_enabled, spatial_enabled)
 
+def choose_task_mode(args) -> None:
     default_task = TaskType(args.task) if args.task else TaskType.BOTH
-    if args.non_interactive:
-        args.task = default_task
-    else:
-        args.task = select_task_mode(default_task=default_task)
+    args.task = default_task if args.non_interactive else select_task_mode(default_task=default_task)
 
+
+def move_invalid_stable_release_task(args) -> None:
     if not args.non_interactive and args.experiment_track == "stable_release" and args.task != TaskType.URBAN_RENEWAL:
         print("[WARN] stable_release only supports task=urban_renewal. Switching experiment track to research_matrix.")
         args.experiment_track = "research_matrix"
 
+
+def configure_urban_runtime(args) -> None:
     default_urban_method = (
         normalize_urban_method(args.urban_method)
         if args.urban_method
@@ -981,143 +980,49 @@ def main():
             )
             args.experiment_track = "research_matrix"
 
+
+def validate_api_access(args) -> None:
     if task_requires_api_key(
         args.task,
         args.urban_method,
         hybrid_llm_assist_enabled=args.hybrid_llm_assist,
     ) and not Config.API_KEY:
-        print("Error: LLM API key not found, but the selected task configuration requires LLM access.")
-        print("Please create a .env file in the project root with DEEPSEEK_API_KEY=your_key")
-        return
-
-    urban_default = Config.DEFAULT_SHOT_MODE if Config.DEFAULT_SHOT_MODE in urban_enabled else urban_enabled[0]
-    spatial_default = Config.DEFAULT_SHOT_MODE if Config.DEFAULT_SHOT_MODE in spatial_enabled else spatial_enabled[0]
-
-    try:
-        if args.task == TaskType.URBAN_RENEWAL:
-            chosen = args.urban_shot or args.shot
-            if chosen:
-                urban_shot = normalize_shot_mode(
-                    chosen,
-                    strategy_registry,
-                    urban_enabled,
-                    theme="urban_renewal",
-                    allow_candidate=args.allow_candidate,
-                )
-            elif urban_method_requires_prompt(
-                args.urban_method,
-                hybrid_llm_assist_enabled=args.hybrid_llm_assist,
-            ):
-                urban_shot = (
-                    urban_default
-                    if args.non_interactive
-                    else select_shot_mode(
-                        registry=strategy_registry,
-                        enabled_modes=urban_enabled,
-                        default_mode=urban_default,
-                        theme="urban_renewal",
-                        label="urban_renewal",
-                        allow_candidate=args.allow_candidate,
-                    )
-                )
-            else:
-                urban_shot = urban_default
-            spatial_shot = spatial_default
-        elif args.task == TaskType.SPATIAL:
-            chosen = args.spatial_shot or args.shot
-            if chosen:
-                spatial_shot = normalize_shot_mode(
-                    chosen,
-                    strategy_registry,
-                    spatial_enabled,
-                    theme="spatial",
-                    allow_candidate=args.allow_candidate,
-                )
-            else:
-                spatial_shot = (
-                    spatial_default
-                    if args.non_interactive
-                    else select_shot_mode(
-                        registry=strategy_registry,
-                        enabled_modes=spatial_enabled,
-                        default_mode=spatial_default,
-                        theme="spatial",
-                        label="spatial",
-                        allow_candidate=args.allow_candidate,
-                    )
-                )
-            urban_shot = urban_default
-        else:
-            urban_chosen = args.urban_shot or args.shot
-            spatial_chosen = args.spatial_shot or args.shot
-            if urban_chosen:
-                urban_shot = normalize_shot_mode(
-                    urban_chosen,
-                    strategy_registry,
-                    urban_enabled,
-                    theme="urban_renewal",
-                    allow_candidate=args.allow_candidate,
-                )
-            elif not urban_method_requires_prompt(
-                args.urban_method,
-                hybrid_llm_assist_enabled=args.hybrid_llm_assist,
-            ):
-                urban_shot = urban_default
-            else:
-                urban_shot = (
-                    urban_default
-                    if args.non_interactive
-                    else select_shot_mode(
-                        registry=strategy_registry,
-                        enabled_modes=urban_enabled,
-                        default_mode=urban_default,
-                        theme="urban_renewal",
-                        label="urban_renewal",
-                        allow_candidate=args.allow_candidate,
-                    )
-                )
-            if spatial_chosen:
-                spatial_shot = normalize_shot_mode(
-                    spatial_chosen,
-                    strategy_registry,
-                    spatial_enabled,
-                    theme="spatial",
-                    allow_candidate=args.allow_candidate,
-                )
-            else:
-                spatial_shot = (
-                    spatial_default
-                    if args.non_interactive
-                    else select_shot_mode(
-                        registry=strategy_registry,
-                        enabled_modes=spatial_enabled,
-                        default_mode=spatial_default,
-                        theme="spatial",
-                        label="spatial",
-                        allow_candidate=args.allow_candidate,
-                    )
-                )
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return
-
-    try:
-        urban_definition = resolve_definition(
-            strategy_registry,
-            theme="urban_renewal",
-            strategy_or_alias=urban_shot,
-            allow_candidate=args.allow_candidate,
+        raise ValueError(
+            "LLM API key not found, but the selected task configuration requires LLM access.\n"
+            "Please create a .env file in the project root with DEEPSEEK_API_KEY=your_key"
         )
-        spatial_definition = resolve_definition(
-            strategy_registry,
-            theme="spatial",
-            strategy_or_alias=spatial_shot,
-            allow_candidate=args.allow_candidate,
-        )
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return
 
+
+def configure_task_runtime(args) -> None:
+    choose_task_mode(args)
+    move_invalid_stable_release_task(args)
+    configure_urban_runtime(args)
+    validate_api_access(args)
+
+
+def resolve_run_strategies(args, strategy_registry, urban_enabled, spatial_enabled):
+    urban_shot, spatial_shot = resolve_selected_shots(
+        args,
+        strategy_registry,
+        urban_enabled,
+        spatial_enabled,
+    )
+    urban_definition = resolve_definition(
+        strategy_registry,
+        theme="urban_renewal",
+        strategy_or_alias=urban_shot,
+        allow_candidate=args.allow_candidate,
+    )
+    spatial_definition = resolve_definition(
+        strategy_registry,
+        theme="spatial",
+        strategy_or_alias=spatial_shot,
+        allow_candidate=args.allow_candidate,
+    )
+    return urban_shot, spatial_shot, urban_definition, spatial_definition
+
+
+def select_run_input(args) -> Path | None:
     preset_input = args.input
     if not preset_input:
         preset_input = default_input_for_track(args.experiment_track)
@@ -1129,9 +1034,9 @@ def main():
         print(f"Selected input file: {args.input}")
     else:
         print("No input file selected or default file not found.")
-        return
-    input_path = Path(args.input).resolve()
+        return None
 
+    input_path = Path(args.input).resolve()
     if not args.non_interactive and args.experiment_track == "stable_release":
         stable_root = Config.STABLE_RELEASE_TASK_DIR.resolve()
         resolved_input = input_path.resolve()
@@ -1141,7 +1046,10 @@ def main():
                 "Switching experiment track to research_matrix."
             )
             args.experiment_track = "research_matrix"
+    return input_path
 
+
+def build_execution_context(args, input_path: Path):
     dataset_id = resolve_dataset_id(input_path, args.dataset_id, args.experiment_track)
     truth_file = resolve_truth_file(input_path, args.truth_file, dataset_id, args.experiment_track)
     session_policy = validate_session_policy(
@@ -1171,7 +1079,10 @@ def main():
         order_seed=args.order_seed,
         max_samples_per_window=args.max_samples_per_window,
     )
+    return dataset_id, truth_file, session_policy, run_context
 
+
+def finalize_output_args(args) -> None:
     if not args.non_interactive:
         args.output = select_output_mode(task=args.task, preset_output=args.output)
 
@@ -1179,53 +1090,9 @@ def main():
         print("[WARN] --strategy is deprecated. Use --task instead.")
         print("[WARN] Ignoring --strategy and using --task mode.")
 
-    print(f"\n{'=' * 60}")
-    print("Urban Renovation Literature Auto-Identification System")
-    print(f"{'=' * 60}")
-    print(f"Input: {args.input}")
-    print(f"Experiment Track: {args.experiment_track}")
-    print(f"Dataset ID: {dataset_id}")
-    print(f"Truth File: {truth_file or 'UNBOUND'}")
-    print(f"Session Policy: {session_policy}")
-    print(f"Order ID: {args.order_id}")
-    print(f"Order Seed: {args.order_seed if args.order_seed is not None else 'N/A'}")
-    print(f"Max Samples / Window: {args.max_samples_per_window}")
-    if args.task == TaskType.BOTH:
-        print("Isolation: strict serial (urban -> spatial)")
-        print(f"Urban Method: {args.urban_method.value}")
-        if args.urban_method == UrbanMethod.THREE_STAGE_HYBRID:
-            print(f"Hybrid LLM Assist: {'on' if args.hybrid_llm_assist else 'off'}")
-        print(f"Urban Mode: {urban_definition.name}")
-        urban_strategy_proof = render_strategy_proof(args.urban_shot or args.shot or urban_shot, urban_definition)
-        if not urban_method_requires_prompt(
-            args.urban_method,
-            hybrid_llm_assist_enabled=args.hybrid_llm_assist,
-        ):
-            urban_strategy_proof += " (unused by current urban method)"
-        print(f"Urban Strategy Proof: {urban_strategy_proof}")
-        print(f"Spatial Mode: {spatial_definition.name}")
-        print(
-            f"Spatial Strategy Proof: {render_strategy_proof(args.spatial_shot or args.shot or spatial_shot, spatial_definition)}"
-        )
-    elif args.task == TaskType.URBAN_RENEWAL:
-        print(f"Urban Method: {args.urban_method.value}")
-        if args.urban_method == UrbanMethod.THREE_STAGE_HYBRID:
-            print(f"Hybrid LLM Assist: {'on' if args.hybrid_llm_assist else 'off'}")
-        print(f"Mode: {urban_definition.name}")
-        urban_strategy_proof = render_strategy_proof(args.urban_shot or args.shot or urban_shot, urban_definition)
-        if not urban_method_requires_prompt(
-            args.urban_method,
-            hybrid_llm_assist_enabled=args.hybrid_llm_assist,
-        ):
-            urban_strategy_proof += " (unused by current urban method)"
-        print(f"Strategy Proof: {urban_strategy_proof}")
-    else:
-        print(f"Mode: {spatial_definition.name}")
-        print(f"Strategy Proof: {render_strategy_proof(args.spatial_shot or args.shot or spatial_shot, spatial_definition)}")
-    print(f"Task: {args.task.value}")
-    print(f"Output: {args.output or 'AUTO'}")
 
-    router = TaskRouter(
+def build_task_router(args, urban_definition, spatial_definition) -> TaskRouter:
+    return TaskRouter(
         shot_mode=urban_definition.name,
         urban_shot_mode=urban_definition.name,
         spatial_shot_mode=spatial_definition.name,
@@ -1233,38 +1100,59 @@ def main():
         hybrid_llm_assist_enabled=args.hybrid_llm_assist,
     )
 
-    try:
-        if args.task == TaskType.URBAN_RENEWAL:
-            print("Running Urban Renewal Classification only...")
-            result = router.run_urban_renewal(
-                input_file=args.input,
-                output_file=args.output,
-                limit=args.limit,
-                run_context=run_context,
-            )
-        elif args.task == TaskType.SPATIAL:
-            print("Running Spatial Attribute Extraction only...")
-            result = router.run_spatial(
-                input_file=args.input,
-                output_file=args.output,
-                limit=args.limit,
-                run_context=run_context,
-            )
-        else:
-            print("Running both tasks (Urban Renewal + Spatial)...")
-            result = router.run_both(
-                input_file=args.input,
-                output_file=args.output,
-                limit=args.limit,
-                run_context=run_context,
-            )
-            print(f"\n{'=' * 60}")
-            print("Results:")
-            print(f"  Urban Renewal: {result['urban_renewal']}")
-            print(f"  Spatial: {result['spatial']}")
-            if result.get("merged"):
-                print(f"  Merged: {result['merged']}")
 
+def main():
+    Config.load_env()
+    Config.validate_runtime_environment(require_py313=True, warn_on_minor_drift=True)
+
+    try:
+        strategy_registry = load_prompt_strategy_registry()
+    except Exception as exc:
+        print(f"Error: failed to load strategy registry: {exc}")
+        return
+
+    args = parse_args()
+    prepare_experiment_args(args)
+    try:
+        urban_enabled, spatial_enabled = load_selectable_modes(strategy_registry, args)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return
+
+    print_startup_overview(urban_enabled, spatial_enabled)
+
+    try:
+        configure_task_runtime(args)
+        urban_shot, spatial_shot, urban_definition, spatial_definition = resolve_run_strategies(
+            args,
+            strategy_registry,
+            urban_enabled,
+            spatial_enabled,
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return
+
+    input_path = select_run_input(args)
+    if input_path is None:
+        return
+
+    dataset_id, truth_file, session_policy, run_context = build_execution_context(args, input_path)
+    finalize_output_args(args)
+    print_run_configuration(
+        args,
+        dataset_id=dataset_id,
+        truth_file=truth_file,
+        session_policy=session_policy,
+        urban_definition=urban_definition,
+        spatial_definition=spatial_definition,
+        urban_shot=urban_shot,
+        spatial_shot=spatial_shot,
+    )
+
+    try:
+        router = build_task_router(args, urban_definition, spatial_definition)
+        result = run_selected_task(router, args, run_context)
         write_manifests_for_results(
             task_mode=args.task,
             input_file=args.input,

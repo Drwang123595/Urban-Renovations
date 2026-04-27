@@ -933,37 +933,38 @@ class UrbanHybridClassifier:
             return True, "risk_tag:explicit_renewal_wording_but_other_object"
         return False, ""
 
-    def _apply_uncertain_nonurban_guard(
+    def _uncertain_nonurban_guard_applies(
         self,
         base: Dict[str, Any],
         *,
-        record: UrbanMetadataRecord,
         route_result,
-        topic_prediction: TopicPrediction,
-        bertopic_signal: BERTopicSignal,
         final_topic: str,
         decision_source: str,
         decision_reason: str,
-        confidence: float,
-        review_flag: int,
-        review_reason: str,
-    ) -> tuple[str, str, str, float, int, str]:
+    ) -> bool:
         if not bool(Config.URBAN_UNCERTAIN_NONURBAN_GUARD_ENABLED):
-            return final_topic, decision_source, decision_reason, confidence, review_flag, review_reason
+            return False
         if topic_group_for_label(final_topic) != "nonurban":
-            return final_topic, decision_source, decision_reason, confidence, review_flag, review_reason
+            return False
         if str(route_result.reason or "").strip() in UNCERTAIN_NONURBAN_HARD_NEGATIVE_REASONS:
-            return final_topic, decision_source, decision_reason, confidence, review_flag, review_reason
+            return False
         if int(bool(base.get("review_flag_rule", 0))) != 1:
-            return final_topic, decision_source, decision_reason, confidence, review_flag, review_reason
+            return False
         if str(decision_source or "").strip() != "rule_model_fusion":
-            return final_topic, decision_source, decision_reason, confidence, review_flag, review_reason
-        if not self._decision_reason_is_uncertain_nonurban_candidate(decision_reason):
-            return final_topic, decision_source, decision_reason, confidence, review_flag, review_reason
+            return False
+        return self._decision_reason_is_uncertain_nonurban_candidate(decision_reason)
 
-        base["uncertain_nonurban_guard_flag"] = 1
-        rule_label = str(base.get("topic_rule", "") or route_result.topic_rule or "").strip()
-        boundary_bucket = str(base.get("boundary_bucket", "") or "").strip()
+    def _uncertain_nonurban_promotion_candidate(
+        self,
+        base: Dict[str, Any],
+        *,
+        route_result,
+        topic_prediction: TopicPrediction,
+        bertopic_signal: BERTopicSignal,
+        boundary_bucket: str,
+    ) -> tuple[str, list[str]]:
+        promotion_label = ""
+        promote_reasons: list[str] = []
 
         within_label = str(base.get("topic_within_family_label", "") or "").strip()
         within_score = self._safe_float(base.get("topic_family_within_score"))
@@ -989,55 +990,116 @@ class UrbanHybridClassifier:
             and boundary_bucket in UNCERTAIN_NONURBAN_PROMOTE_BOUNDARY_BUCKETS
         )
 
-        promote_reasons: list[str] = []
-        promotion_label = ""
         if within_threshold:
             promotion_label = within_label
-            promote_reasons.append(
-                f"within_family:{within_label}@{within_score:.2f}/{within_margin:.2f}"
-            )
+            promote_reasons.append(f"within_family:{within_label}@{within_score:.2f}/{within_margin:.2f}")
         if local_threshold:
-            if not promotion_label:
-                promotion_label = local_label
-            promote_reasons.append(
-                f"local_urban:{local_label}@{local_confidence:.2f}/{local_margin:.2f}"
-            )
+            promotion_label = promotion_label or local_label
+            promote_reasons.append(f"local_urban:{local_label}@{local_confidence:.2f}/{local_margin:.2f}")
         if family_bucket_threshold:
-            promote_reasons.append(
-                f"family_prob_bucket:{family_probability_urban:.2f}:{boundary_bucket}"
+            promote_reasons.append(f"family_prob_bucket:{family_probability_urban:.2f}:{boundary_bucket}")
+            promotion_label = promotion_label or self._uncertain_nonurban_fallback_label(
+                promote_reasons,
+                route_result=route_result,
+                topic_prediction=topic_prediction,
+                bertopic_signal=bertopic_signal,
             )
-            if not promotion_label:
-                fallback_label, fallback_score, fallback_margin = self._select_topic_within_family(
-                    family="urban",
-                    candidate_final_topic=UNKNOWN_TOPIC_LABEL,
-                    route_result=route_result,
-                    topic_prediction=topic_prediction,
-                    bertopic_signal=bertopic_signal,
-                )
-                if fallback_label != UNKNOWN_TOPIC_LABEL:
-                    promotion_label = fallback_label
-                    promote_reasons.append(
-                        f"fallback_within:{fallback_label}@{fallback_score:.2f}/{fallback_margin:.2f}"
-                    )
+        return promotion_label, promote_reasons
+
+    def _uncertain_nonurban_fallback_label(
+        self,
+        promote_reasons: list[str],
+        *,
+        route_result,
+        topic_prediction: TopicPrediction,
+        bertopic_signal: BERTopicSignal,
+    ) -> str:
+        fallback_label, fallback_score, fallback_margin = self._select_topic_within_family(
+            family="urban",
+            candidate_final_topic=UNKNOWN_TOPIC_LABEL,
+            route_result=route_result,
+            topic_prediction=topic_prediction,
+            bertopic_signal=bertopic_signal,
+        )
+        if fallback_label == UNKNOWN_TOPIC_LABEL:
+            return ""
+        promote_reasons.append(f"fallback_within:{fallback_label}@{fallback_score:.2f}/{fallback_margin:.2f}")
+        return fallback_label
+
+    def _uncertain_nonurban_promotion_block_reason(
+        self,
+        *,
+        record: UrbanMetadataRecord,
+        base: Dict[str, Any],
+        final_topic: str,
+    ) -> str:
+        block_reason = self._nonurban_promotion_block_reason(
+            record=record,
+            base=base,
+            final_topic=final_topic,
+        )
+        if not block_reason and not self._has_renewal_anchor_signal(record=record):
+            block_reason = "missing_renewal_anchor"
+        return block_reason
+
+    def _mark_uncertain_nonurban_guard(
+        self,
+        base: Dict[str, Any],
+        *,
+        action: str,
+        evidence: str,
+    ) -> None:
+        base["uncertain_nonurban_guard_action"] = action
+        base["uncertain_nonurban_guard_reason"] = evidence
+        base["uncertain_nonurban_guard_evidence"] = evidence
+
+    def _apply_uncertain_nonurban_guard(
+        self,
+        base: Dict[str, Any],
+        *,
+        record: UrbanMetadataRecord,
+        route_result,
+        topic_prediction: TopicPrediction,
+        bertopic_signal: BERTopicSignal,
+        final_topic: str,
+        decision_source: str,
+        decision_reason: str,
+        confidence: float,
+        review_flag: int,
+        review_reason: str,
+    ) -> tuple[str, str, str, float, int, str]:
+        if not self._uncertain_nonurban_guard_applies(
+            base,
+            route_result=route_result,
+            final_topic=final_topic,
+            decision_source=decision_source,
+            decision_reason=decision_reason,
+        ):
+            return final_topic, decision_source, decision_reason, confidence, review_flag, review_reason
+
+        base["uncertain_nonurban_guard_flag"] = 1
+        rule_label = str(base.get("topic_rule", "") or route_result.topic_rule or "").strip()
+        boundary_bucket = str(base.get("boundary_bucket", "") or "").strip()
+        promotion_label, promote_reasons = self._uncertain_nonurban_promotion_candidate(
+            base,
+            route_result=route_result,
+            topic_prediction=topic_prediction,
+            bertopic_signal=bertopic_signal,
+            boundary_bucket=boundary_bucket,
+        )
         if promote_reasons and promotion_label:
-            block_reason = self._nonurban_promotion_block_reason(
+            block_reason = self._uncertain_nonurban_promotion_block_reason(
                 record=record,
                 base=base,
                 final_topic=final_topic,
             )
-            if not block_reason and not self._has_renewal_anchor_signal(record=record):
-                block_reason = "missing_renewal_anchor"
             if block_reason:
-                base["uncertain_nonurban_guard_action"] = "blocked_nonurban_risk"
-                base["uncertain_nonurban_guard_reason"] = block_reason
-                base["uncertain_nonurban_guard_evidence"] = block_reason
+                self._mark_uncertain_nonurban_guard(base, action="blocked_nonurban_risk", evidence=block_reason)
                 decision_reason = f"{decision_reason};uncertain_nonurban_blocked:{block_reason}".strip(";")
                 return final_topic, decision_source, decision_reason, confidence, review_flag, review_reason
 
             evidence = "; ".join(promote_reasons)
-            base["uncertain_nonurban_guard_action"] = "promote"
-            base["uncertain_nonurban_guard_reason"] = evidence
-            base["uncertain_nonurban_guard_evidence"] = evidence
+            self._mark_uncertain_nonurban_guard(base, action="promote", evidence=evidence)
             decision_reason = (
                 f"{decision_reason};uncertain_nonurban_promote:{promotion_label};{evidence}"
             ).strip(";")
@@ -1059,9 +1121,7 @@ class UrbanHybridClassifier:
             if n8_evidence:
                 reasons.append(n8_evidence)
             evidence = "; ".join(reasons)
-            base["uncertain_nonurban_guard_action"] = "review"
-            base["uncertain_nonurban_guard_reason"] = evidence
-            base["uncertain_nonurban_guard_evidence"] = evidence
+            self._mark_uncertain_nonurban_guard(base, action="review", evidence=evidence)
             base["unknown_recovery_path"] = "not_triggered"
             base["unknown_recovery_evidence"] = ""
             decision_reason = f"{decision_reason};uncertain_nonurban_review:{evidence}".strip(";")
@@ -1867,6 +1927,140 @@ class UrbanHybridClassifier:
             "recovery_evidence": recovery_evidence,
         }
 
+    def _offline_rule_unknown_local_resolution(
+        self,
+        *,
+        route_result,
+        rule_label: str,
+        risk_tags,
+        positive_signals,
+        binary_probability: float,
+        bertopic_high_purity: bool,
+        build_rule_payload,
+    ) -> Optional[Dict[str, Any]]:
+        if rule_label == "U1" and float(route_result.topic_rule_score or 0.0) >= 2.5:
+            if any(
+                self._has_signal(positive_signals, token)
+                for token in (
+                    "anchor:urban renewal",
+                    "anchor:urban regeneration",
+                    "anchor:district regeneration",
+                    "anchor:redevelopment",
+                    "anchor:renewal",
+                    "anchor:upgrading",
+                )
+            ):
+                return build_rule_payload("u1_anchor_bundle")
+        if rule_label == "U9" and float(route_result.topic_rule_score or 0.0) >= 4.0:
+            if any(
+                self._has_signal(positive_signals, token)
+                for token in (
+                    "combo:urban regeneration+policy",
+                    "combo:urban regeneration+participation",
+                    "combo:urban regeneration+governance",
+                    "combo:urban renewal+governance",
+                )
+            ):
+                return build_rule_payload("u9_policy_governance_bundle")
+        if rule_label == "U10" and float(route_result.topic_rule_score or 0.0) >= 3.5 and binary_probability >= 0.90:
+            if any(
+                self._has_signal(positive_signals, token)
+                for token in (
+                    "anchor:urban regeneration",
+                    "anchor:urban redevelopment",
+                    "anchor:redevelopment",
+                )
+            ):
+                return build_rule_payload("u10_finance_anchor_bundle")
+        if rule_label == "U12":
+            has_gentrification_signal = self._has_signal(positive_signals, "gentrification")
+            has_social_history_risk = self._has_signal(risk_tags, "social_history_media_risk")
+            if (
+                (has_gentrification_signal and not has_social_history_risk)
+                or bertopic_high_purity
+                or float(route_result.topic_rule_margin or 0.0) >= 2.0
+            ):
+                return build_rule_payload("u12_gentrification_bundle")
+        if rule_label == "U4":
+            high_score = float(route_result.topic_rule_score or 0.0) >= 3.8
+            title_score = (
+                float(route_result.topic_rule_score or 0.0) >= 2.85
+                and self._has_signal(positive_signals, "title:redevelopment")
+            )
+            if high_score or title_score:
+                return build_rule_payload("u4_redevelopment_bundle")
+        if (
+            rule_label == "U13"
+            and float(route_result.topic_rule_score or 0.0) >= 4.5
+            and self._has_signal(positive_signals, "anchor:brownfield")
+            and self._has_signal(positive_signals, "anchor:revitalization")
+        ):
+            return build_rule_payload("u13_brownfield_interim_use")
+        return None
+
+    def _offline_nonurban_rule_local_resolution(
+        self,
+        *,
+        rule_label: str,
+        local_label: str,
+        local_confidence: float,
+        local_margin: float,
+        binary_probability: float,
+        build_local_payload,
+    ) -> Optional[Dict[str, Any]]:
+        local_override = OFFLINE_UNKNOWN_RECOVERY_LOCAL_RULES.get((rule_label, local_label))
+        if (
+            local_override is not None
+            and local_confidence >= local_override[0]
+            and local_margin >= local_override[1]
+            and binary_probability >= local_override[2]
+        ):
+            trigger = f"{rule_label.lower()}_to_{local_label.lower()}_strong_local"
+            return build_local_payload(trigger)
+        return None
+
+    def _offline_urban_rule_nonurban_local_resolution(
+        self,
+        *,
+        route_result,
+        rule_label: str,
+        local_label: str,
+        risk_tags,
+        positive_signals,
+        binary_probability: float,
+        build_rule_payload,
+    ) -> Optional[Dict[str, Any]]:
+        if rule_label == "U1" and local_label == "N1" and float(route_result.topic_rule_score or 0.0) >= 2.5:
+            return build_rule_payload("u1_over_n1_curated")
+        if rule_label == "U12" and local_label == "N1" and float(route_result.topic_rule_score or 0.0) >= 2.0:
+            return build_rule_payload("u12_over_n1_curated")
+        if (
+            rule_label == "U12"
+            and local_label in {"N5", "N7", "N9"}
+            and float(route_result.topic_rule_score or 0.0) >= 4.5
+            and self._has_signal(positive_signals, "gentrification")
+            and self._has_signal(positive_signals, "displacement")
+        ):
+            return build_rule_payload("u12_displacement_cross_group")
+        if (
+            rule_label == "U4"
+            and local_label == "N1"
+            and not self._has_signal(risk_tags, "greenfield")
+            and (
+                self._has_signal(positive_signals, "redevelopment")
+                or self._has_signal(positive_signals, "revitalization")
+            )
+        ):
+            return build_rule_payload("u4_over_n1_inner_city")
+        if (
+            rule_label == "U5"
+            and local_label in {"N9", "N10"}
+            and binary_probability <= 0.03
+            and self._has_signal(positive_signals, "anchor:brownfield")
+        ):
+            return build_rule_payload("u5_brownfield_cross_group")
+        return None
+
     def _resolve_unknown_with_offline_signals(
         self,
         *,
@@ -1923,128 +2117,36 @@ class UrbanHybridClassifier:
             )
 
         if rule_label != UNKNOWN_TOPIC_LABEL and local_label == UNKNOWN_TOPIC_LABEL:
-            if (
-                rule_label == "U1"
-                and float(route_result.topic_rule_score or 0.0) >= 2.5
-                and any(
-                    self._has_signal(
-                        positive_signals,
-                        token,
-                    )
-                    for token in (
-                        "anchor:urban renewal",
-                        "anchor:urban regeneration",
-                        "anchor:district regeneration",
-                        "anchor:redevelopment",
-                        "anchor:renewal",
-                        "anchor:upgrading",
-                    )
-                )
-            ):
-                return build_rule_payload("u1_anchor_bundle")
-            if (
-                rule_label == "U9"
-                and float(route_result.topic_rule_score or 0.0) >= 4.0
-                and any(
-                    self._has_signal(
-                        positive_signals,
-                        token,
-                    )
-                    for token in (
-                        "combo:urban regeneration+policy",
-                        "combo:urban regeneration+participation",
-                        "combo:urban regeneration+governance",
-                        "combo:urban renewal+governance",
-                    )
-                )
-            ):
-                return build_rule_payload("u9_policy_governance_bundle")
-            if (
-                rule_label == "U10"
-                and float(route_result.topic_rule_score or 0.0) >= 3.5
-                and binary_probability >= 0.90
-                and any(
-                    self._has_signal(
-                        positive_signals,
-                        token,
-                    )
-                    for token in (
-                        "anchor:urban regeneration",
-                        "anchor:urban redevelopment",
-                        "anchor:redevelopment",
-                    )
-                )
-            ):
-                return build_rule_payload("u10_finance_anchor_bundle")
-            if rule_label == "U12":
-                has_gentrification_signal = self._has_signal(positive_signals, "gentrification")
-                has_social_history_risk = self._has_signal(risk_tags, "social_history_media_risk")
-                if (
-                    (has_gentrification_signal and not has_social_history_risk)
-                    or bertopic_high_purity
-                    or float(route_result.topic_rule_margin or 0.0) >= 2.0
-                ):
-                    return build_rule_payload("u12_gentrification_bundle")
-            if (
-                rule_label == "U4"
-                and (
-                    float(route_result.topic_rule_score or 0.0) >= 3.8
-                    or (
-                        float(route_result.topic_rule_score or 0.0) >= 2.85
-                        and self._has_signal(positive_signals, "title:redevelopment")
-                    )
-                )
-            ):
-                return build_rule_payload("u4_redevelopment_bundle")
-            if (
-                rule_label == "U13"
-                and float(route_result.topic_rule_score or 0.0) >= 4.5
-                and self._has_signal(positive_signals, "anchor:brownfield")
-                and self._has_signal(positive_signals, "anchor:revitalization")
-            ):
-                return build_rule_payload("u13_brownfield_interim_use")
+            return self._offline_rule_unknown_local_resolution(
+                route_result=route_result,
+                rule_label=rule_label,
+                risk_tags=risk_tags,
+                positive_signals=positive_signals,
+                binary_probability=binary_probability,
+                bertopic_high_purity=bertopic_high_purity,
+                build_rule_payload=build_rule_payload,
+            )
 
         if rule_group == "nonurban" and local_group == "urban":
-            local_override = OFFLINE_UNKNOWN_RECOVERY_LOCAL_RULES.get((rule_label, local_label))
-            if (
-                local_override is not None
-                and local_confidence >= local_override[0]
-                and local_margin >= local_override[1]
-                and binary_probability >= local_override[2]
-            ):
-                trigger = f"{rule_label.lower()}_to_{local_label.lower()}_strong_local"
-                return build_local_payload(trigger)
+            return self._offline_nonurban_rule_local_resolution(
+                rule_label=rule_label,
+                local_label=local_label,
+                local_confidence=local_confidence,
+                local_margin=local_margin,
+                binary_probability=binary_probability,
+                build_local_payload=build_local_payload,
+            )
 
         if rule_group == "urban" and local_group == "nonurban":
-            if rule_label == "U1" and local_label == "N1" and float(route_result.topic_rule_score or 0.0) >= 2.5:
-                return build_rule_payload("u1_over_n1_curated")
-            if rule_label == "U12" and local_label == "N1" and float(route_result.topic_rule_score or 0.0) >= 2.0:
-                return build_rule_payload("u12_over_n1_curated")
-            if (
-                rule_label == "U12"
-                and local_label in {"N5", "N7", "N9"}
-                and float(route_result.topic_rule_score or 0.0) >= 4.5
-                and self._has_signal(positive_signals, "gentrification")
-                and self._has_signal(positive_signals, "displacement")
-            ):
-                return build_rule_payload("u12_displacement_cross_group")
-            if (
-                rule_label == "U4"
-                and local_label == "N1"
-                and not self._has_signal(risk_tags, "greenfield")
-                and (
-                    self._has_signal(positive_signals, "redevelopment")
-                    or self._has_signal(positive_signals, "revitalization")
-                )
-            ):
-                return build_rule_payload("u4_over_n1_inner_city")
-            if (
-                rule_label == "U5"
-                and local_label in {"N9", "N10"}
-                and binary_probability <= 0.03
-                and self._has_signal(positive_signals, "anchor:brownfield")
-            ):
-                return build_rule_payload("u5_brownfield_cross_group")
+            return self._offline_urban_rule_nonurban_local_resolution(
+                route_result=route_result,
+                rule_label=rule_label,
+                local_label=local_label,
+                risk_tags=risk_tags,
+                positive_signals=positive_signals,
+                binary_probability=binary_probability,
+                build_rule_payload=build_rule_payload,
+            )
 
         return None
 
@@ -2360,6 +2462,196 @@ class UrbanHybridClassifier:
             "review_reason": "rule_local_cross_group_both_weak",
         }
 
+    def _unknown_hint_payload(
+        self,
+        *,
+        final_topic: str,
+        decision_reason: str,
+        confidence: float,
+        recovery_path: str | None = None,
+        recovery_evidence: str | None = None,
+    ) -> Dict[str, Any]:
+        payload = {
+            "final_topic": final_topic,
+            "decision_source": "unknown_hint_resolution",
+            "decision_reason": decision_reason,
+            "confidence": round(float(confidence), 4),
+        }
+        if recovery_path is not None:
+            payload["recovery_path"] = recovery_path
+        if recovery_evidence is not None:
+            payload["recovery_evidence"] = recovery_evidence
+        return payload
+
+    def _resolve_rule_known_local_unknown_with_hints(
+        self,
+        *,
+        rule_label: str,
+        rule_group: str,
+        rule_confidence: float,
+        llm_hint: str,
+        bertopic_urban_support: bool,
+        bertopic_nonurban_support: bool,
+        urban_recovery_blocked: bool,
+    ) -> Optional[Dict[str, Any]]:
+        weak_nonurban_floor = 0.24
+        if rule_group == "nonurban" and llm_hint == "0" and rule_confidence >= weak_nonurban_floor:
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"rule_unknown_local_llm_family_nonurban_weak:{rule_label}",
+                confidence=max(rule_confidence, 0.60),
+            )
+        weak_urban_floor = UNKNOWN_RECOVERY_WEAK_URBAN_RULES.get(rule_label)
+        if (
+            weak_urban_floor is not None
+            and llm_hint == "1"
+            and rule_confidence >= weak_urban_floor
+            and not urban_recovery_blocked
+        ):
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"rule_unknown_local_llm_family_curated:{rule_label}",
+                confidence=max(rule_confidence, 0.60),
+            )
+        if rule_group == "urban" and llm_hint == "1" and rule_confidence >= 0.35 and not urban_recovery_blocked:
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"rule_unknown_local_llm_family:{rule_label}",
+                confidence=max(rule_confidence, 0.62),
+            )
+        if rule_group == "nonurban" and llm_hint == "0" and rule_confidence >= 0.35:
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"rule_unknown_local_llm_family:{rule_label}",
+                confidence=max(rule_confidence, 0.62),
+            )
+        if rule_group == "urban" and bertopic_urban_support and rule_confidence >= 0.50 and not urban_recovery_blocked:
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"rule_unknown_local_bertopic_support:{rule_label}",
+                confidence=max(rule_confidence, 0.64),
+            )
+        if rule_group == "nonurban" and bertopic_nonurban_support and rule_confidence >= 0.50:
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"rule_unknown_local_bertopic_support:{rule_label}",
+                confidence=max(rule_confidence, 0.64),
+            )
+        return None
+
+    def _resolve_urban_rule_nonurban_local_with_hints(
+        self,
+        *,
+        rule_label: str,
+        local_label: str,
+        rule_confidence: float,
+        local_confidence: float,
+        local_margin: float,
+        llm_hint: str,
+        bertopic_urban_support: bool,
+        urban_recovery_blocked: bool,
+    ) -> Optional[Dict[str, Any]]:
+        if (
+            llm_hint == "1"
+            and bertopic_urban_support
+            and rule_confidence >= 0.35
+            and local_confidence <= 0.60
+            and local_margin <= 1.0
+            and not urban_recovery_blocked
+        ):
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"cross_group_dual_urban_support:{rule_label}",
+                confidence=max(rule_confidence, 0.64),
+            )
+        curated_threshold = UNKNOWN_RECOVERY_RULE_TO_TOPIC.get((rule_label, local_label))
+        if (
+            llm_hint == "1"
+            and curated_threshold is not None
+            and rule_confidence >= curated_threshold
+            and not urban_recovery_blocked
+        ):
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"cross_group_curated_rule_urban:{rule_label}",
+                confidence=max(rule_confidence, 0.62),
+            )
+        return None
+
+    def _resolve_nonurban_rule_urban_local_with_hints(
+        self,
+        *,
+        rule_label: str,
+        local_label: str,
+        rule_confidence: float,
+        local_confidence: float,
+        local_margin: float,
+        llm_hint: str,
+        bertopic_nonurban_support: bool,
+        urban_recovery_blocked: bool,
+    ) -> Optional[Dict[str, Any]]:
+        local_override = UNKNOWN_RECOVERY_RULE_TO_LOCAL.get((rule_label, local_label))
+        if (
+            llm_hint == "1"
+            and local_override is not None
+            and local_confidence >= local_override[0]
+            and local_margin >= local_override[1]
+            and not urban_recovery_blocked
+        ):
+            return self._unknown_hint_payload(
+                final_topic=local_label,
+                decision_reason=f"cross_group_curated_local_urban:{local_label}",
+                confidence=max(local_confidence, 0.68),
+            )
+        if (
+            llm_hint == "0"
+            and bertopic_nonurban_support
+            and rule_confidence >= 0.35
+            and local_confidence <= 0.60
+            and local_margin <= 1.0
+        ):
+            return self._unknown_hint_payload(
+                final_topic=rule_label,
+                decision_reason=f"cross_group_dual_nonurban_support:{rule_label}",
+                confidence=max(rule_confidence, 0.64),
+            )
+        return None
+
+    def _resolve_local_known_rule_unknown_with_hints(
+        self,
+        *,
+        local_label: str,
+        local_group: str,
+        local_confidence: float,
+        llm_hint: str,
+        bertopic_urban_support: bool,
+        bertopic_nonurban_support: bool,
+        urban_recovery_blocked: bool,
+    ) -> Optional[Dict[str, Any]]:
+        if (
+            local_group == "urban"
+            and llm_hint == "1"
+            and bertopic_urban_support
+            and local_confidence >= 0.62
+            and not urban_recovery_blocked
+        ):
+            return self._unknown_hint_payload(
+                final_topic=local_label,
+                decision_reason=f"local_unknown_rule_llm_bertopic_support:{local_label}",
+                confidence=max(local_confidence, 0.64),
+                recovery_path="unknown_hint_bertopic",
+                recovery_evidence=f"family=urban;sources=llm+local+bertopic;label={local_label}",
+            )
+        if local_group == "nonurban" and llm_hint == "0" and bertopic_nonurban_support and local_confidence >= 0.62:
+            return self._unknown_hint_payload(
+                final_topic=local_label,
+                decision_reason=f"local_unknown_rule_llm_bertopic_support:{local_label}",
+                confidence=max(local_confidence, 0.64),
+                recovery_path="unknown_hint_bertopic",
+                recovery_evidence=f"family=nonurban;sources=llm+local+bertopic;label={local_label}",
+            )
+        return None
+
     def _resolve_unknown_with_hints(
         self,
         *,
@@ -2393,149 +2685,58 @@ class UrbanHybridClassifier:
             return offline_resolved
 
         if rule_label != UNKNOWN_TOPIC_LABEL and local_label == UNKNOWN_TOPIC_LABEL:
-            weak_nonurban_floor = 0.24
-            if rule_group == "nonurban" and llm_hint == "0" and rule_confidence >= weak_nonurban_floor:
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"rule_unknown_local_llm_family_nonurban_weak:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.60), 4),
-                }
-            weak_urban_floor = UNKNOWN_RECOVERY_WEAK_URBAN_RULES.get(rule_label)
-            if (
-                weak_urban_floor is not None
-                and llm_hint == "1"
-                and rule_confidence >= weak_urban_floor
-                and not urban_recovery_blocked
-            ):
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"rule_unknown_local_llm_family_curated:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.60), 4),
-                }
-            if (
-                rule_group == "urban"
-                and llm_hint == "1"
-                and rule_confidence >= 0.35
-                and not urban_recovery_blocked
-            ):
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"rule_unknown_local_llm_family:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.62), 4),
-                }
-            if rule_group == "nonurban" and llm_hint == "0" and rule_confidence >= 0.35:
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"rule_unknown_local_llm_family:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.62), 4),
-                }
-            if (
-                rule_group == "urban"
-                and bertopic_urban_support
-                and rule_confidence >= 0.50
-                and not urban_recovery_blocked
-            ):
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"rule_unknown_local_bertopic_support:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.64), 4),
-                }
-            if rule_group == "nonurban" and bertopic_nonurban_support and rule_confidence >= 0.50:
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"rule_unknown_local_bertopic_support:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.64), 4),
-                }
+            resolved = self._resolve_rule_known_local_unknown_with_hints(
+                rule_label=rule_label,
+                rule_group=rule_group,
+                rule_confidence=rule_confidence,
+                llm_hint=llm_hint,
+                bertopic_urban_support=bertopic_urban_support,
+                bertopic_nonurban_support=bertopic_nonurban_support,
+                urban_recovery_blocked=urban_recovery_blocked,
+            )
+            if resolved is not None:
+                return resolved
 
         if rule_group == "urban" and local_group == "nonurban":
-            if (
-                llm_hint == "1"
-                and bertopic_urban_support
-                and rule_confidence >= 0.35
-                and local_confidence <= 0.60
-                and local_margin <= 1.0
-                and not urban_recovery_blocked
-            ):
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"cross_group_dual_urban_support:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.64), 4),
-                }
-            curated_threshold = UNKNOWN_RECOVERY_RULE_TO_TOPIC.get((rule_label, local_label))
-            if (
-                llm_hint == "1"
-                and curated_threshold is not None
-                and rule_confidence >= curated_threshold
-                and not urban_recovery_blocked
-            ):
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"cross_group_curated_rule_urban:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.62), 4),
-                }
+            resolved = self._resolve_urban_rule_nonurban_local_with_hints(
+                rule_label=rule_label,
+                local_label=local_label,
+                rule_confidence=rule_confidence,
+                local_confidence=local_confidence,
+                local_margin=local_margin,
+                llm_hint=llm_hint,
+                bertopic_urban_support=bertopic_urban_support,
+                urban_recovery_blocked=urban_recovery_blocked,
+            )
+            if resolved is not None:
+                return resolved
 
         if rule_group == "nonurban" and local_group == "urban":
-            local_override = UNKNOWN_RECOVERY_RULE_TO_LOCAL.get((rule_label, local_label))
-            if (
-                llm_hint == "1"
-                and local_override is not None
-                and local_confidence >= local_override[0]
-                and local_margin >= local_override[1]
-                and not urban_recovery_blocked
-            ):
-                return {
-                    "final_topic": local_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"cross_group_curated_local_urban:{local_label}",
-                    "confidence": round(max(local_confidence, 0.68), 4),
-                }
-            if (
-                llm_hint == "0"
-                and bertopic_nonurban_support
-                and rule_confidence >= 0.35
-                and local_confidence <= 0.60
-                and local_margin <= 1.0
-            ):
-                return {
-                    "final_topic": rule_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"cross_group_dual_nonurban_support:{rule_label}",
-                    "confidence": round(max(rule_confidence, 0.64), 4),
-                }
+            resolved = self._resolve_nonurban_rule_urban_local_with_hints(
+                rule_label=rule_label,
+                local_label=local_label,
+                rule_confidence=rule_confidence,
+                local_confidence=local_confidence,
+                local_margin=local_margin,
+                llm_hint=llm_hint,
+                bertopic_nonurban_support=bertopic_nonurban_support,
+                urban_recovery_blocked=urban_recovery_blocked,
+            )
+            if resolved is not None:
+                return resolved
 
         if rule_label == UNKNOWN_TOPIC_LABEL and local_label != UNKNOWN_TOPIC_LABEL:
-            if (
-                local_group == "urban"
-                and llm_hint == "1"
-                and bertopic_urban_support
-                and local_confidence >= 0.62
-                and not urban_recovery_blocked
-            ):
-                return {
-                    "final_topic": local_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"local_unknown_rule_llm_bertopic_support:{local_label}",
-                    "confidence": round(max(local_confidence, 0.64), 4),
-                    "recovery_path": "unknown_hint_bertopic",
-                    "recovery_evidence": f"family=urban;sources=llm+local+bertopic;label={local_label}",
-                }
-            if local_group == "nonurban" and llm_hint == "0" and bertopic_nonurban_support and local_confidence >= 0.62:
-                return {
-                    "final_topic": local_label,
-                    "decision_source": "unknown_hint_resolution",
-                    "decision_reason": f"local_unknown_rule_llm_bertopic_support:{local_label}",
-                    "confidence": round(max(local_confidence, 0.64), 4),
-                    "recovery_path": "unknown_hint_bertopic",
-                    "recovery_evidence": f"family=nonurban;sources=llm+local+bertopic;label={local_label}",
-                }
+            resolved = self._resolve_local_known_rule_unknown_with_hints(
+                local_label=local_label,
+                local_group=local_group,
+                local_confidence=local_confidence,
+                llm_hint=llm_hint,
+                bertopic_urban_support=bertopic_urban_support,
+                bertopic_nonurban_support=bertopic_nonurban_support,
+                urban_recovery_blocked=urban_recovery_blocked,
+            )
+            if resolved is not None:
+                return resolved
 
         consensus = self._resolve_unknown_with_family_consensus(
             route_result=route_result,
@@ -2835,6 +3036,156 @@ class UrbanHybridClassifier:
         reasons = list(dict.fromkeys(item for item in reasons if item))
         return int(bool(reasons)), ";".join(reasons)
 
+    def _append_topic_group_evidence(
+        self,
+        positive: list[str],
+        negative: list[str],
+        *,
+        final_topic: str,
+        topic_group: str,
+    ) -> None:
+        if topic_group == "urban":
+            positive.append(f"topic_final={final_topic}")
+        elif topic_group == "nonurban":
+            negative.append(f"topic_final={final_topic}")
+        else:
+            negative.append("topic_final=Unknown")
+
+    def _append_open_set_evidence(
+        self,
+        base: Dict[str, Any],
+        positive: list[str],
+        negative: list[str],
+    ) -> str:
+        open_set_topic = str(base.get("open_set_topic", "") or "")
+        if open_set_topic == OPEN_SET_URBAN_LABEL:
+            reason = str(base.get("open_set_reason", "") or "open_set")
+            evidence = str(base.get("open_set_evidence", "") or "")
+            positive.append(f"open_set={reason}" + (f"({evidence})" if evidence else ""))
+        elif open_set_topic == OPEN_SET_NONURBAN_LABEL:
+            negative.append("open_set=nonurban_other")
+        return open_set_topic
+
+    def _append_guard_evidence(
+        self,
+        base: Dict[str, Any],
+        positive: list[str],
+        negative: list[str],
+    ) -> tuple[str, str]:
+        anchor_action = str(base.get("anchor_guard_action", "") or "")
+        if anchor_action == "promote":
+            positive.append(f"anchor_guard=promote({base.get('anchor_guard_hits', '')})")
+        elif anchor_action == "review":
+            positive.append("anchor_guard=core_anchor_review")
+
+        uncertain_action = str(base.get("uncertain_nonurban_guard_action", "") or "")
+        if uncertain_action == "promote":
+            positive.append(f"uncertain_nonurban_guard=promote({base.get('uncertain_nonurban_guard_reason', '')})")
+        elif uncertain_action == "review":
+            negative.append(f"uncertain_nonurban_guard=review({base.get('uncertain_nonurban_guard_reason', '')})")
+        elif uncertain_action == "keep_0":
+            negative.append(f"uncertain_nonurban_guard=keep_0({base.get('uncertain_nonurban_guard_reason', '')})")
+        return anchor_action, uncertain_action
+
+    def _append_probability_evidence(
+        self,
+        base: Dict[str, Any],
+        positive: list[str],
+        negative: list[str],
+    ) -> None:
+        family_probability = self._safe_float(base.get("family_probability_urban"), default=0.5)
+        if family_probability >= 0.60:
+            positive.append(f"family_probability={family_probability:.4f}")
+        elif family_probability <= 0.35:
+            negative.append(f"family_probability={family_probability:.4f}")
+
+        topic_binary_probability = self._safe_float(base.get("topic_binary_probability"), default=0.5)
+        if topic_binary_probability >= 0.60:
+            positive.append(f"topic_binary_probability={topic_binary_probability:.4f}")
+        elif topic_binary_probability <= 0.35:
+            negative.append(f"topic_binary_probability={topic_binary_probability:.4f}")
+
+    def _append_hint_and_risk_evidence(
+        self,
+        base: Dict[str, Any],
+        positive: list[str],
+        negative: list[str],
+    ) -> None:
+        llm_hint = self._normalize_family_hint_value(base.get("llm_family_hint", ""))
+        if llm_hint == "1":
+            positive.append("llm_family_hint=1")
+        elif llm_hint == "0":
+            negative.append("llm_family_hint=0")
+
+        risk_tags = sorted(self._extract_stage1_risk_tags(base))
+        for tag in risk_tags:
+            if tag == RISK_EXPLICIT_RENEWAL_OTHER_OBJECT:
+                positive.append(f"risk_tag={tag}")
+            else:
+                negative.append(f"risk_tag={tag}")
+
+    def _append_recall_calibration_evidence(
+        self,
+        base: Dict[str, Any],
+        positive: list[str],
+        negative: list[str],
+    ) -> str:
+        recall_tier = str(base.get("binary_recall_calibration_tier", "") or "none")
+        if int(bool(base.get("binary_recall_calibration_flag", 0))):
+            positive.append(f"recall_calibration={recall_tier}")
+        elif recall_tier == "blocked":
+            negative.append(f"recall_calibration_blocked={base.get('binary_recall_calibration_reason', '')}")
+        return recall_tier
+
+    def _decision_evidence_balance(
+        self,
+        base: Dict[str, Any],
+        *,
+        taxonomy_status: str,
+        binary_label: str,
+        confidence: float,
+    ) -> str:
+        hard_negative = taxonomy_status == "hard_negative" or str(base.get("metadata_route_reason", "") or "") in BINARY_HARD_NEGATIVE_REASONS
+        consistency_flag = int(bool(base.get("binary_topic_consistency_flag", 0)))
+        if hard_negative:
+            return "hard_negative"
+        if consistency_flag:
+            return "conflict_positive" if binary_label == "1" else "conflict_negative"
+        if binary_label == "1" and confidence >= 0.75:
+            return "strong_positive"
+        if binary_label == "1" and confidence >= 0.60:
+            return "positive"
+        if binary_label == "1":
+            return "low_confidence_positive"
+        if binary_label == "0" and confidence >= 0.75:
+            return "strong_negative"
+        if binary_label == "0" and confidence >= 0.60:
+            return "negative"
+        if binary_label == "0":
+            return "low_confidence_negative"
+        return "unknown"
+
+    def _decision_rule_stack(
+        self,
+        base: Dict[str, Any],
+        *,
+        anchor_action: str,
+        uncertain_action: str,
+        open_set_topic: str,
+        recall_tier: str,
+    ) -> list[str]:
+        return [
+            f"route={base.get('metadata_route', '')}:{base.get('metadata_route_reason', '')}",
+            f"rule={base.get('topic_rule', '')}",
+            f"local={base.get('topic_local_label', '')}",
+            f"family={base.get('family_decision_source', '')}:{base.get('family_predicted_family', '')}",
+            f"anchor={anchor_action or 'none'}",
+            f"uncertain_nonurban={uncertain_action or 'none'}",
+            f"open_set={open_set_topic or 'none'}:{base.get('open_set_reason', '')}",
+            f"binary_audit={base.get('binary_audit_resolution_action', 'none')}",
+            f"binary={base.get('binary_decision_source', '')}:{recall_tier}",
+        ]
+
     def _summarize_decision_explanation(
         self,
         base: Dict[str, Any],
@@ -2854,87 +3205,23 @@ class UrbanHybridClassifier:
         taxonomy_status = str(base.get("taxonomy_coverage_status", "") or "unknown")
         positive: list[str] = []
         negative: list[str] = []
-
-        if topic_group == "urban":
-            positive.append(f"topic_final={final_topic}")
-        elif topic_group == "nonurban":
-            negative.append(f"topic_final={final_topic}")
-        else:
-            negative.append("topic_final=Unknown")
-
-        open_set_topic = str(base.get("open_set_topic", "") or "")
-        if open_set_topic == OPEN_SET_URBAN_LABEL:
-            reason = str(base.get("open_set_reason", "") or "open_set")
-            evidence = str(base.get("open_set_evidence", "") or "")
-            positive.append(f"open_set={reason}" + (f"({evidence})" if evidence else ""))
-        elif open_set_topic == OPEN_SET_NONURBAN_LABEL:
-            negative.append("open_set=nonurban_other")
-
-        anchor_action = str(base.get("anchor_guard_action", "") or "")
-        if anchor_action == "promote":
-            positive.append(f"anchor_guard=promote({base.get('anchor_guard_hits', '')})")
-        elif anchor_action == "review":
-            positive.append("anchor_guard=core_anchor_review")
-
-        uncertain_action = str(base.get("uncertain_nonurban_guard_action", "") or "")
-        if uncertain_action == "promote":
-            positive.append(f"uncertain_nonurban_guard=promote({base.get('uncertain_nonurban_guard_reason', '')})")
-        elif uncertain_action == "review":
-            negative.append(f"uncertain_nonurban_guard=review({base.get('uncertain_nonurban_guard_reason', '')})")
-        elif uncertain_action == "keep_0":
-            negative.append(f"uncertain_nonurban_guard=keep_0({base.get('uncertain_nonurban_guard_reason', '')})")
-
-        family_probability = self._safe_float(base.get("family_probability_urban"), default=0.5)
-        if family_probability >= 0.60:
-            positive.append(f"family_probability={family_probability:.4f}")
-        elif family_probability <= 0.35:
-            negative.append(f"family_probability={family_probability:.4f}")
-
-        topic_binary_probability = self._safe_float(base.get("topic_binary_probability"), default=0.5)
-        if topic_binary_probability >= 0.60:
-            positive.append(f"topic_binary_probability={topic_binary_probability:.4f}")
-        elif topic_binary_probability <= 0.35:
-            negative.append(f"topic_binary_probability={topic_binary_probability:.4f}")
-
-        llm_hint = self._normalize_family_hint_value(base.get("llm_family_hint", ""))
-        if llm_hint == "1":
-            positive.append("llm_family_hint=1")
-        elif llm_hint == "0":
-            negative.append("llm_family_hint=0")
-
-        risk_tags = sorted(self._extract_stage1_risk_tags(base))
-        for tag in risk_tags:
-            if tag == RISK_EXPLICIT_RENEWAL_OTHER_OBJECT:
-                positive.append(f"risk_tag={tag}")
-            else:
-                negative.append(f"risk_tag={tag}")
-
-        recall_tier = str(base.get("binary_recall_calibration_tier", "") or "none")
-        if int(bool(base.get("binary_recall_calibration_flag", 0))):
-            positive.append(f"recall_calibration={recall_tier}")
-        elif recall_tier == "blocked":
-            negative.append(f"recall_calibration_blocked={base.get('binary_recall_calibration_reason', '')}")
-
-        hard_negative = taxonomy_status == "hard_negative" or str(base.get("metadata_route_reason", "") or "") in BINARY_HARD_NEGATIVE_REASONS
-        consistency_flag = int(bool(base.get("binary_topic_consistency_flag", 0)))
-        if hard_negative:
-            balance = "hard_negative"
-        elif consistency_flag:
-            balance = "conflict_positive" if binary_label == "1" else "conflict_negative"
-        elif binary_label == "1" and confidence >= 0.75:
-            balance = "strong_positive"
-        elif binary_label == "1" and confidence >= 0.60:
-            balance = "positive"
-        elif binary_label == "1":
-            balance = "low_confidence_positive"
-        elif binary_label == "0" and confidence >= 0.75:
-            balance = "strong_negative"
-        elif binary_label == "0" and confidence >= 0.60:
-            balance = "negative"
-        elif binary_label == "0":
-            balance = "low_confidence_negative"
-        else:
-            balance = "unknown"
+        self._append_topic_group_evidence(
+            positive,
+            negative,
+            final_topic=final_topic,
+            topic_group=topic_group,
+        )
+        open_set_topic = self._append_open_set_evidence(base, positive, negative)
+        anchor_action, uncertain_action = self._append_guard_evidence(base, positive, negative)
+        self._append_probability_evidence(base, positive, negative)
+        self._append_hint_and_risk_evidence(base, positive, negative)
+        recall_tier = self._append_recall_calibration_evidence(base, positive, negative)
+        balance = self._decision_evidence_balance(
+            base,
+            taxonomy_status=taxonomy_status,
+            binary_label=binary_label,
+            confidence=confidence,
+        )
 
         comparator = ">=" if score >= threshold else "<"
         final_label_display = binary_label if binary_label in {"0", "1"} else UNKNOWN_TOPIC_LABEL
@@ -2943,17 +3230,13 @@ class UrbanHybridClassifier:
             f"confidence={float(confidence):.4f}; topic={final_topic}/{topic_group}; "
             f"coverage={taxonomy_status}; source={decision_source}; review={int(bool(review_flag))}"
         )
-        stack_parts = [
-            f"route={base.get('metadata_route', '')}:{base.get('metadata_route_reason', '')}",
-            f"rule={base.get('topic_rule', '')}",
-            f"local={base.get('topic_local_label', '')}",
-            f"family={base.get('family_decision_source', '')}:{base.get('family_predicted_family', '')}",
-            f"anchor={anchor_action or 'none'}",
-            f"uncertain_nonurban={uncertain_action or 'none'}",
-            f"open_set={open_set_topic or 'none'}:{base.get('open_set_reason', '')}",
-            f"binary_audit={base.get('binary_audit_resolution_action', 'none')}",
-            f"binary={base.get('binary_decision_source', '')}:{recall_tier}",
-        ]
+        stack_parts = self._decision_rule_stack(
+            base,
+            anchor_action=anchor_action,
+            uncertain_action=uncertain_action,
+            open_set_topic=open_set_topic,
+            recall_tier=recall_tier,
+        )
         return {
             "decision_explanation": explanation,
             "primary_positive_evidence": "; ".join(dict.fromkeys(item for item in positive if item)) or "none",
