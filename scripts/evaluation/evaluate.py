@@ -718,11 +718,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def evaluate():
-    Config.load_env()
-    args = parse_args()
-    assert_training_source_contract(allowed_training_workbooks(Config.TRAIN_DIR))
-
+def _resolve_evaluation_context(args):
     task_dir = None
     if args.task:
         task_dir = Config.DATA_DIR / args.task
@@ -733,7 +729,7 @@ def evaluate():
         selected = select_from_list(tasks, prompt="Available Tasks:")
         if not selected:
             print("No task selected.")
-            return
+            return None
         task_dir = selected
 
     if task_dir:
@@ -744,36 +740,133 @@ def evaluate():
         labels_dir = Path(".")
         default_output_dir = None
         default_report_dir = Path("Result")
+    return labels_dir, default_output_dir, default_report_dir
 
-    pred_files = collect_pred_files(args.pred, args.pred_dir, default_output_dir, args.pred_scope)
-    truth_files = resolve_truth_files(labels_dir, args.truth, experiment_track=args.experiment_track)
 
-    report_dir = Path(args.report_dir) if args.report_dir else default_report_dir
-    report_dir.mkdir(parents=True, exist_ok=True)
-
+def _print_evaluation_inputs(truth_files, pred_files, pred_scope: str, report_dir: Path) -> None:
     if len(truth_files) == 1:
         print(f"Ground truth: {truth_files[0]}")
     else:
         print(f"Ground truth candidates: {len(truth_files)} (auto-match enabled)")
     print(f"Prediction files: {len(pred_files)}")
-    print(f"Prediction scope: {args.pred_scope}")
+    print(f"Prediction scope: {pred_scope}")
     print(f"Report dir: {report_dir}")
 
-    all_metrics = []
-    all_chunk_metrics = []
-    all_guardrails = []
-    all_urban_errors = []
-    all_theme_metrics = []
-    all_theme_confusion = []
-    all_theme_family = []
-    all_unknown_rates = []
-    all_decision_source_metrics = []
-    all_topic_distributions = []
-    all_boundary_bucket_metrics = []
-    all_unknown_conflict_metrics = []
-    all_explainability_quality = []
-    all_evidence_balance_metrics = []
-    all_bootstrap_ci = []
+
+def _new_frame_collections() -> dict[str, list[pd.DataFrame]]:
+    return {
+        "metrics": [],
+        "chunk_metrics": [],
+        "guardrails": [],
+        "urban_errors": [],
+        "theme_metrics": [],
+        "theme_confusion": [],
+        "theme_family": [],
+        "unknown_rates": [],
+        "decision_source_metrics": [],
+        "topic_distributions": [],
+        "boundary_bucket_metrics": [],
+        "unknown_conflict_metrics": [],
+        "explainability_quality": [],
+        "evidence_balance_metrics": [],
+        "bootstrap_ci": [],
+    }
+
+
+def _append_evaluated_frames(frames: dict[str, list[pd.DataFrame]], evaluated) -> tuple[pd.DataFrame, pd.DataFrame, Path]:
+    (
+        aligned_merged_df,
+        metrics_df,
+        chunk_metrics_df,
+        guardrail_df,
+        urban_error_df,
+        theme_metrics_df,
+        theme_confusion_df,
+        theme_family_df,
+        unknown_rate_df,
+        decision_source_df,
+        topic_distribution_df,
+        boundary_bucket_df,
+        unknown_conflict_df,
+        explainability_quality_df,
+        evidence_balance_df,
+        bootstrap_ci_df,
+        report_path,
+    ) = evaluated
+    frames["metrics"].append(metrics_df)
+    frames["chunk_metrics"].append(chunk_metrics_df)
+    frames["guardrails"].append(guardrail_df)
+    frames["urban_errors"].append(urban_error_df)
+    frames["theme_metrics"].append(theme_metrics_df)
+    frames["theme_confusion"].append(theme_confusion_df)
+    frames["theme_family"].append(theme_family_df)
+    frames["unknown_rates"].append(unknown_rate_df)
+    frames["decision_source_metrics"].append(decision_source_df)
+    frames["topic_distributions"].append(topic_distribution_df)
+    frames["boundary_bucket_metrics"].append(boundary_bucket_df)
+    frames["unknown_conflict_metrics"].append(unknown_conflict_df)
+    frames["explainability_quality"].append(explainability_quality_df)
+    frames["evidence_balance_metrics"].append(evidence_balance_df)
+    frames["bootstrap_ci"].append(bootstrap_ci_df)
+    return aligned_merged_df, guardrail_df, report_path
+
+
+def _metadata_rows_for_prediction(
+    args,
+    pred_file: Path,
+    truth_file: Path,
+    match_mode: str,
+    manifest,
+    manifest_file: Path,
+    signature: str,
+    long_context_signature: str,
+    comparable: bool,
+    mismatches: list[str],
+) -> tuple[dict, dict, dict]:
+    truth_match_row = {
+        "prediction_file": pred_file.name,
+        "truth_file": truth_file.name,
+        "match_mode": match_mode,
+    }
+    comparability_row = {
+        "prediction_file": pred_file.name,
+        "truth_file": truth_file.name,
+        "match_mode": match_mode,
+        "manifest_found": manifest is not None,
+        "manifest_path": str(manifest_file.resolve()),
+        "comparability_signature": signature,
+        "comparable_with_first": comparable,
+        "comparability_issues": ";".join(mismatches),
+    }
+    runtime = (manifest or {}).get("runtime") or {}
+    experiment = (manifest or {}).get("experiment") or {}
+    run_metadata_row = {
+        "prediction_file": pred_file.name,
+        "prediction_stem": pred_file.stem,
+        "truth_file": str(truth_file.resolve()),
+        "truth_match_mode": match_mode,
+        "manifest_found": manifest is not None,
+        "manifest_path": str(manifest_file.resolve()),
+        "entrypoint": runtime.get("entrypoint", ""),
+        "runtime_python": runtime.get("python_version", ""),
+        "task_mode": manifest.get("task_mode") if manifest else "",
+        "experiment_track": experiment.get("experiment_track", args.experiment_track),
+        "dataset_id": experiment.get("dataset_id", ""),
+        "session_policy": experiment.get("session_policy", ""),
+        "order_id": experiment.get("order_id", ""),
+        "order_seed": experiment.get("order_seed", ""),
+        "max_samples_per_window": experiment.get("max_samples_per_window", ""),
+        "pred_scope": experiment.get("pred_scope", args.pred_scope),
+        "urban_method": experiment.get("urban_method", ""),
+        "hybrid_llm_assist_enabled": experiment.get("hybrid_llm_assist_enabled", ""),
+        "comparability_signature": signature,
+        "long_context_group_signature": long_context_signature,
+    }
+    return truth_match_row, comparability_row, run_metadata_row
+
+
+def _evaluate_prediction_files(args, pred_files, truth_files, report_dir: Path) -> dict:
+    frames = _new_frame_collections()
     aligned_frames = {}
     truth_cache = {}
     truth_match_rows = []
@@ -802,56 +895,19 @@ def evaluate():
         print(f"Evaluating: {pred_file.name}")
         print(f"Matched truth: {truth_file.name} ({match_mode})")
 
-        (
-            aligned_merged_df,
-            metrics_df,
-            chunk_metrics_df,
-            guardrail_df,
-            urban_error_df,
-            theme_metrics_df,
-            theme_confusion_df,
-            theme_family_df,
-            unknown_rate_df,
-            decision_source_df,
-            topic_distribution_df,
-            boundary_bucket_df,
-            unknown_conflict_df,
-            explainability_quality_df,
-            evidence_balance_df,
-            bootstrap_ci_df,
-            report_path,
-        ) = evaluate_one_file(
-            truth_df=truth_df,
-            pred_file=pred_file,
-            report_dir=report_dir,
-            strict=args.strict,
-            coverage_threshold=args.coverage_threshold,
-            spatial_desc_threshold=args.spatial_desc_threshold,
-            chunk_size=args.chunk_size,
+        aligned_merged_df, guardrail_df, report_path = _append_evaluated_frames(
+            frames,
+            evaluate_one_file(
+                truth_df=truth_df,
+                pred_file=pred_file,
+                report_dir=report_dir,
+                strict=args.strict,
+                coverage_threshold=args.coverage_threshold,
+                spatial_desc_threshold=args.spatial_desc_threshold,
+                chunk_size=args.chunk_size,
+            ),
         )
-        all_metrics.append(metrics_df)
-        all_chunk_metrics.append(chunk_metrics_df)
-        all_guardrails.append(guardrail_df)
-        all_urban_errors.append(urban_error_df)
-        all_theme_metrics.append(theme_metrics_df)
-        all_theme_confusion.append(theme_confusion_df)
-        all_theme_family.append(theme_family_df)
-        all_unknown_rates.append(unknown_rate_df)
-        all_decision_source_metrics.append(decision_source_df)
-        all_topic_distributions.append(topic_distribution_df)
-        all_boundary_bucket_metrics.append(boundary_bucket_df)
-        all_unknown_conflict_metrics.append(unknown_conflict_df)
-        all_explainability_quality.append(explainability_quality_df)
-        all_evidence_balance_metrics.append(evidence_balance_df)
-        all_bootstrap_ci.append(bootstrap_ci_df)
         aligned_frames[pred_file.stem] = aligned_merged_df
-        truth_match_rows.append(
-            {
-                "prediction_file": pred_file.name,
-                "truth_file": truth_file.name,
-                "match_mode": match_mode,
-            }
-        )
 
         manifest = load_prompt_manifest(pred_file)
         manifest_file = manifest_path_for_output(pred_file)
@@ -871,44 +927,21 @@ def evaluate():
             )
             comparable = len(mismatches) == 0
 
-        comparability_rows.append(
-            {
-                "prediction_file": pred_file.name,
-                "truth_file": truth_file.name,
-                "match_mode": match_mode,
-                "manifest_found": manifest is not None,
-                "manifest_path": str(manifest_file.resolve()),
-                "comparability_signature": signature,
-                "comparable_with_first": comparable,
-                "comparability_issues": ";".join(mismatches),
-            }
+        truth_match_row, comparability_row, run_metadata_row = _metadata_rows_for_prediction(
+            args=args,
+            pred_file=pred_file,
+            truth_file=truth_file,
+            match_mode=match_mode,
+            manifest=manifest,
+            manifest_file=manifest_file,
+            signature=signature,
+            long_context_signature=long_context_signature,
+            comparable=comparable,
+            mismatches=mismatches,
         )
-        runtime = (manifest or {}).get("runtime") or {}
-        experiment = (manifest or {}).get("experiment") or {}
-        run_metadata_rows.append(
-            {
-                "prediction_file": pred_file.name,
-                "prediction_stem": pred_file.stem,
-                "truth_file": str(truth_file.resolve()),
-                "truth_match_mode": match_mode,
-                "manifest_found": manifest is not None,
-                "manifest_path": str(manifest_file.resolve()),
-                "entrypoint": runtime.get("entrypoint", ""),
-                "runtime_python": runtime.get("python_version", ""),
-                "task_mode": manifest.get("task_mode") if manifest else "",
-                "experiment_track": experiment.get("experiment_track", args.experiment_track),
-                "dataset_id": experiment.get("dataset_id", ""),
-                "session_policy": experiment.get("session_policy", ""),
-                "order_id": experiment.get("order_id", ""),
-                "order_seed": experiment.get("order_seed", ""),
-                "max_samples_per_window": experiment.get("max_samples_per_window", ""),
-                "pred_scope": experiment.get("pred_scope", args.pred_scope),
-                "urban_method": experiment.get("urban_method", ""),
-                "hybrid_llm_assist_enabled": experiment.get("hybrid_llm_assist_enabled", ""),
-                "comparability_signature": signature,
-                "long_context_group_signature": long_context_signature,
-            }
-        )
+        truth_match_rows.append(truth_match_row)
+        comparability_rows.append(comparability_row)
+        run_metadata_rows.append(run_metadata_row)
 
         warned_rows = guardrail_df[guardrail_df["Warnings"].astype(str) != ""]
         for _, warned_row in warned_rows.iterrows():
@@ -924,7 +957,22 @@ def evaluate():
             print(f"[WARN] Missing prompt manifest for {pred_file.name}")
         print(f"Saved report: {report_path.name}")
 
-    comparability_df = pd.DataFrame(comparability_rows)
+    return {
+        "frames": frames,
+        "aligned_frames": aligned_frames,
+        "truth_match_rows": truth_match_rows,
+        "comparability_rows": comparability_rows,
+        "run_metadata_rows": run_metadata_rows,
+    }
+
+
+def _concat_frames(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _write_summary_workbook(args, pred_files, truth_files, report_dir: Path, state: dict) -> None:
+    frames = state["frames"]
+    comparability_df = pd.DataFrame(state["comparability_rows"])
     non_comparable_df = comparability_df[comparability_df["comparable_with_first"] == False]
     if args.strict_comparable and not non_comparable_df.empty:
         raise ValueError(
@@ -932,36 +980,22 @@ def evaluate():
             + ", ".join(non_comparable_df["prediction_file"].tolist())
         )
 
-    merged_metrics = pd.concat(all_metrics, ignore_index=True) if all_metrics else pd.DataFrame()
-    merged_chunk_metrics = pd.concat(all_chunk_metrics, ignore_index=True) if all_chunk_metrics else pd.DataFrame()
-    merged_guardrails = pd.concat(all_guardrails, ignore_index=True) if all_guardrails else pd.DataFrame()
-    merged_urban_errors = pd.concat(all_urban_errors, ignore_index=True) if all_urban_errors else pd.DataFrame()
-    merged_theme_metrics = pd.concat(all_theme_metrics, ignore_index=True) if all_theme_metrics else pd.DataFrame()
-    merged_theme_confusion = pd.concat(all_theme_confusion, ignore_index=True) if all_theme_confusion else pd.DataFrame()
-    merged_theme_family = pd.concat(all_theme_family, ignore_index=True) if all_theme_family else pd.DataFrame()
-    merged_unknown_rates = pd.concat(all_unknown_rates, ignore_index=True) if all_unknown_rates else pd.DataFrame()
-    merged_decision_source_metrics = (
-        pd.concat(all_decision_source_metrics, ignore_index=True) if all_decision_source_metrics else pd.DataFrame()
-    )
-    merged_topic_distributions = (
-        pd.concat(all_topic_distributions, ignore_index=True) if all_topic_distributions else pd.DataFrame()
-    )
-    merged_boundary_bucket_metrics = (
-        pd.concat(all_boundary_bucket_metrics, ignore_index=True) if all_boundary_bucket_metrics else pd.DataFrame()
-    )
-    merged_unknown_conflicts = (
-        pd.concat(all_unknown_conflict_metrics, ignore_index=True) if all_unknown_conflict_metrics else pd.DataFrame()
-    )
-    merged_explainability_quality = (
-        pd.concat(all_explainability_quality, ignore_index=True) if all_explainability_quality else pd.DataFrame()
-    )
-    merged_evidence_balance_metrics = (
-        pd.concat(all_evidence_balance_metrics, ignore_index=True) if all_evidence_balance_metrics else pd.DataFrame()
-    )
-    merged_bootstrap_ci = (
-        pd.concat(all_bootstrap_ci, ignore_index=True) if all_bootstrap_ci else pd.DataFrame()
-    )
-    run_metadata_df = pd.DataFrame(run_metadata_rows)
+    merged_metrics = _concat_frames(frames["metrics"])
+    merged_chunk_metrics = _concat_frames(frames["chunk_metrics"])
+    merged_guardrails = _concat_frames(frames["guardrails"])
+    merged_urban_errors = _concat_frames(frames["urban_errors"])
+    merged_theme_metrics = _concat_frames(frames["theme_metrics"])
+    merged_theme_confusion = _concat_frames(frames["theme_confusion"])
+    merged_theme_family = _concat_frames(frames["theme_family"])
+    merged_unknown_rates = _concat_frames(frames["unknown_rates"])
+    merged_decision_source_metrics = _concat_frames(frames["decision_source_metrics"])
+    merged_topic_distributions = _concat_frames(frames["topic_distributions"])
+    merged_boundary_bucket_metrics = _concat_frames(frames["boundary_bucket_metrics"])
+    merged_unknown_conflicts = _concat_frames(frames["unknown_conflict_metrics"])
+    merged_explainability_quality = _concat_frames(frames["explainability_quality"])
+    merged_evidence_balance_metrics = _concat_frames(frames["evidence_balance_metrics"])
+    merged_bootstrap_ci = _concat_frames(frames["bootstrap_ci"])
+    run_metadata_df = pd.DataFrame(state["run_metadata_rows"])
 
     all_comparable = comparability_df.empty or comparability_df["comparable_with_first"].all()
     summary_df = summarize_metrics(merged_metrics) if all_comparable else pd.DataFrame()
@@ -978,7 +1012,7 @@ def evaluate():
         merged_unknown_rates,
         run_metadata_df,
     )
-    mcnemar_df = summarize_mcnemar(aligned_frames)
+    mcnemar_df = summarize_mcnemar(state["aligned_frames"])
 
     if not merged_metrics.empty:
         summary_path = report_dir / "Eval_Summary.xlsx"
@@ -1006,10 +1040,29 @@ def evaluate():
             merged_chunk_metrics.to_excel(writer, sheet_name="Chunk Metrics", index=False)
             merged_guardrails.to_excel(writer, sheet_name="Guardrails", index=False)
             merged_urban_errors.to_excel(writer, sheet_name="Urban Error Analysis", index=False)
-            pd.DataFrame(truth_match_rows).to_excel(writer, sheet_name="Truth Match", index=False)
+            pd.DataFrame(state["truth_match_rows"]).to_excel(writer, sheet_name="Truth Match", index=False)
             comparability_df.to_excel(writer, sheet_name="Comparability", index=False)
         print(f"Saved summary: {summary_path.name}")
 
+
+def evaluate():
+    Config.load_env()
+    args = parse_args()
+    assert_training_source_contract(allowed_training_workbooks(Config.TRAIN_DIR))
+
+    context = _resolve_evaluation_context(args)
+    if context is None:
+        return
+    labels_dir, default_output_dir, default_report_dir = context
+    pred_files = collect_pred_files(args.pred, args.pred_dir, default_output_dir, args.pred_scope)
+    truth_files = resolve_truth_files(labels_dir, args.truth, experiment_track=args.experiment_track)
+
+    report_dir = Path(args.report_dir) if args.report_dir else default_report_dir
+    report_dir.mkdir(parents=True, exist_ok=True)
+    _print_evaluation_inputs(truth_files, pred_files, args.pred_scope, report_dir)
+
+    state = _evaluate_prediction_files(args, pred_files, truth_files, report_dir)
+    _write_summary_workbook(args, pred_files, truth_files, report_dir, state)
     print("Evaluation complete.")
 
 

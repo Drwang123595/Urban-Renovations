@@ -1,17 +1,13 @@
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
 from .base import ExtractionStrategy
-from ..runtime.memory import ConversationMemory
 
 class ReflectionStrategy(ExtractionStrategy):
     def process(self, title: str, abstract: str, session_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
         # Independent memory per paper
-        skip_index = True if session_path else False
-        
-        memory = ConversationMemory(
+        memory = self._create_isolated_memory(
             self.prompt_gen.get_reflection_system_prompt(),
             session_path=session_path,
-            skip_index=skip_index
         )
         
         # Round 1: Initial Answer

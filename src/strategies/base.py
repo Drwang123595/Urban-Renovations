@@ -50,6 +50,17 @@ class ExtractionStrategy(ABC):
             
         return memory
 
+    def _create_isolated_memory(
+        self,
+        system_prompt: str,
+        session_path: Optional[Union[str, Path]] = None,
+    ) -> ConversationMemory:
+        return ConversationMemory(
+            system_prompt,
+            session_path=session_path,
+            skip_index=bool(session_path),
+        )
+
     def parse_tab_output(self, text: str) -> Dict[str, Any]:
         """Helper to parse TAB-separated output (4 fields). Enforces strict 1/0."""
         line = ""

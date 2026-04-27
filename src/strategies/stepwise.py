@@ -1,7 +1,6 @@
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
 from .base import ExtractionStrategy
-from ..runtime.memory import ConversationMemory
 
 class StepwiseStrategy(ExtractionStrategy):
     def process(self, title: str, abstract: str, session_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -10,12 +9,9 @@ class StepwiseStrategy(ExtractionStrategy):
         Only Step 1 is used (Urban Renewal = 1 or 0).
         Spatial attributes are extracted separately using the 'spatial' strategy.
         """
-        skip_index = True if session_path else False
-
-        memory = ConversationMemory(
+        memory = self._create_isolated_memory(
             self.prompt_gen.get_step_system_prompt(),
             session_path=session_path,
-            skip_index=skip_index
         )
 
         results: Dict[str, Any] = {}

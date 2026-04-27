@@ -1,4 +1,4 @@
-import pandas as pd
+﻿import pandas as pd
 import time
 import shutil
 import re
@@ -36,7 +36,7 @@ class DataProcessor:
         for name in self.strategy_names:
             strategy_cls = StrategyRegistry.get_strategy(name)
             if not strategy_cls:
-                raise ValueError(f"非法策略: {name}. 可选策略: {available_strategies}")
+                raise ValueError(f"闈炴硶绛栫暐: {name}. 鍙€夌瓥鐣? {available_strategies}")
             self.strategies[name] = strategy_cls(self.client, self.prompt_gen)
         self._validate_prompt_routes()
         
@@ -59,30 +59,20 @@ class DataProcessor:
 
     def _raise_fatal_strategy_error(self, strategy_name: str, error: Exception):
         raise RuntimeError(
-            f"策略执行失败并已终止: strategy={strategy_name}, error={type(error).__name__}: {error}"
+            f"绛栫暐鎵ц澶辫触骞跺凡缁堟: strategy={strategy_name}, error={type(error).__name__}: {error}"
         ) from error
-        
-    def run_batch(self, input_file: str = None, output_file: str = None, limit: int = None):
-        """
-        Run the extraction on the Excel file using Hybrid Scheduler (Serial + Parallel).
-        """
-        input_path = Path(input_file) if input_file else self.config.INPUT_FILE
-        task_name = input_path.stem  # e.g., "test1" from "test1.xlsx"
 
-        # Define task directory structure: Data/{task_name}/runs/{track}/{run_tag}/
+    def _prepare_legacy_run_layout(self, input_path: Path, timestamp: str):
+        task_name = input_path.stem
         task_dir = self.config.DATA_DIR / task_name
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
         run_dir = task_dir / "runs" / "research_matrix" / timestamp
         output_dir = run_dir / "predictions"
         labels_dir = task_dir / "input" / "labels"
         result_dir = run_dir / "reports"
-        
-        # Ensure directories exist
-        for d in [output_dir, labels_dir, result_dir]:
-            d.mkdir(parents=True, exist_ok=True)
-            
-        # --- Auto-Archive Labels ---
-        # Copy input file to labels directory if not present
+
+        for directory in [output_dir, labels_dir, result_dir]:
+            directory.mkdir(parents=True, exist_ok=True)
+
         label_file_path = labels_dir / input_path.name
         if not label_file_path.exists():
             print(f"Archiving input file to labels: {label_file_path}")
@@ -90,42 +80,128 @@ class DataProcessor:
         else:
             print(f"Labels file already exists at: {label_file_path}")
 
-        # Prepare output files and result containers for each strategy
-        output_files = {}
-        results_lists = {name: [] for name in self.strategy_names}
-        
+        return task_name, task_dir, output_dir
+
+    def _build_legacy_output_files(self, output_file: str, output_dir: Path, timestamp: str) -> Dict[str, Path]:
         if output_file:
             base_output = Path(output_file)
             if len(self.strategy_names) == 1:
-                output_files[self.strategy_names[0]] = base_output
-            else:
-                for name in self.strategy_names:
-                    new_name = f"{base_output.stem}_{name}{base_output.suffix}"
-                    output_files[name] = base_output.parent / new_name
-        else:
-            for name in self.strategy_names:
-                filename = f"{name}_{self.prompt_gen.shot_mode}_{timestamp}.xlsx"
-                output_files[name] = output_dir / filename
-            
-        print(f"Reading from {input_path}")
+                return {self.strategy_names[0]: base_output}
+            return {
+                name: base_output.parent / f"{base_output.stem}_{name}{base_output.suffix}"
+                for name in self.strategy_names
+            }
+        return {
+            name: output_dir / f"{name}_{self.prompt_gen.shot_mode}_{timestamp}.xlsx"
+            for name in self.strategy_names
+        }
+
+    def _legacy_header_names(self, width: int) -> List[str]:
+        col_names = []
+        if width >= 1:
+            col_names.append("Article Title")
+        if width >= 2:
+            col_names.append("Abstract")
+        label_cols = [
+            Schema.IS_URBAN_RENEWAL,
+            Schema.IS_SPATIAL,
+            Schema.SPATIAL_LEVEL,
+            Schema.SPATIAL_DESC,
+        ]
+        remaining = width - len(col_names)
+        col_names.extend(label_cols[:max(0, min(remaining, len(label_cols)))])
+        if remaining > len(label_cols):
+            col_names.extend([f"extra_{i+1}" for i in range(remaining - len(label_cols))])
+        return col_names
+
+    def _load_legacy_input_frame(self, input_path: Path, limit: int = None) -> pd.DataFrame:
         df = pd.read_excel(input_path, engine="openpyxl")
         if "Article Title" not in df.columns or "Abstract" not in df.columns:
             df = pd.read_excel(input_path, engine="openpyxl", header=None)
             df = df.dropna(axis=1, how="all")
-            col_names = []
-            if df.shape[1] >= 1:
-                col_names.append("Article Title")
-            if df.shape[1] >= 2:
-                col_names.append("Abstract")
-            label_cols = ["是否属于城市更新研究", "空间研究/非空间研究", "空间等级", "具体空间描述"]
-            remaining = df.shape[1] - len(col_names)
-            col_names.extend(label_cols[:max(0, min(remaining, len(label_cols)))])
-            if remaining > len(label_cols):
-                col_names.extend([f"extra_{i+1}" for i in range(remaining - len(label_cols))])
-            df.columns = col_names
-        
-        if limit:
-            df = df.head(limit)
+            df.columns = self._legacy_header_names(df.shape[1])
+        return df.head(limit) if limit else df
+
+    def _base_result_row(self, row, exclude_cols: List[str]) -> Dict:
+        base_row = row.to_dict()
+        for col in exclude_cols:
+            if col in base_row:
+                del base_row[col]
+        return base_row
+
+    def _paper_id(self, index: int, title: str) -> str:
+        clean_title = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
+        return f"{index+1:03d}_{clean_title[:50]}"
+
+    def _append_strategy_result(self, results_lists: Dict[str, List], name: str, base_row: Dict, extracted: Dict):
+        res_row = base_row.copy()
+        res_row.update(extracted)
+        results_lists[name].append(res_row)
+
+    def _run_parallel_strategies(
+        self,
+        executor: ThreadPoolExecutor,
+        task_name: str,
+        paper_id: str,
+        title: str,
+        abstract: str,
+        base_row: Dict,
+        results_lists: Dict[str, List],
+    ):
+        futures = {}
+        for name in self.parallel_strategies:
+            strategy_obj = self.strategies[name]
+            session_path = self.config.SESSIONS_DIR / task_name / paper_id / f"{name}.json"
+            future = executor.submit(strategy_obj.process, title, abstract, session_path)
+            futures[future] = name
+
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                extracted = future.result()
+            except Exception as e:
+                if isinstance(e, (FileNotFoundError, ValueError)):
+                    self._raise_fatal_strategy_error(name, e)
+                extracted = {"Error": str(e)}
+            self._append_strategy_result(results_lists, name, base_row, extracted)
+
+    def _run_serial_strategies(
+        self,
+        title: str,
+        abstract: str,
+        base_row: Dict,
+        results_lists: Dict[str, List],
+    ):
+        for name in self.serial_strategies:
+            strategy_obj = self.strategies[name]
+            try:
+                extracted = strategy_obj.process(title, abstract, session_path=None)
+            except Exception as e:
+                if isinstance(e, (FileNotFoundError, ValueError)):
+                    self._raise_fatal_strategy_error(name, e)
+                extracted = {"Error": str(e)}
+            self._append_strategy_result(results_lists, name, base_row, extracted)
+
+    def _save_legacy_results(self, output_files: Dict[str, Path], results_lists: Dict[str, List]):
+        for name, res_list in results_lists.items():
+            if res_list:
+                temp_df = pd.DataFrame(res_list)
+                temp_df.to_excel(output_files[name], index=False, engine="openpyxl")
+
+    def run_batch(self, input_file: str = None, output_file: str = None, limit: int = None):
+        """
+        Run the extraction on the Excel file using Hybrid Scheduler (Serial + Parallel).
+        """
+        input_path = Path(input_file) if input_file else self.config.INPUT_FILE
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        task_name, task_dir, output_dir = self._prepare_legacy_run_layout(input_path, timestamp)
+
+        # Prepare output files and result containers for each strategy
+        output_files = self._build_legacy_output_files(output_file, output_dir, timestamp)
+        results_lists = {name: [] for name in self.strategy_names}
+            
+        print(f"Reading from {input_path}")
+        df = self._load_legacy_input_frame(input_path, limit)
             
         # Ensure output directory exists
         for f in output_files.values():
@@ -137,11 +213,11 @@ class DataProcessor:
             "Label_Spatial", 
             "Label_Level", 
             "Label_Desc",
-            "是否属于城市更新研究", 
-            "空间研究/非空间研究",
-            "空间等级",
-            "具体空间描述",
-            "是否属于城市更新研究(人工)", 
+            Schema.IS_URBAN_RENEWAL,
+            Schema.IS_SPATIAL,
+            Schema.SPATIAL_LEVEL,
+            Schema.SPATIAL_DESC,
+            f"{Schema.IS_URBAN_RENEWAL}(浜哄伐)", 
         ]
         
         print(f"Processing {len(df)} papers with mode='{self.prompt_gen.shot_mode}'...")
@@ -165,70 +241,35 @@ class DataProcessor:
                     continue
                     
                 # Clean row: remove label columns before adding new results
-                base_row = row.to_dict()
-                for col in exclude_cols:
-                    if col in base_row:
-                        del base_row[col]
-
-                # Clean title for filename usage
-                clean_title = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
-                clean_title = clean_title[:50]
-                paper_id = f"{index+1:03d}_{clean_title}"
+                base_row = self._base_result_row(row, exclude_cols)
+                paper_id = self._paper_id(index, title)
 
                 # ---------------------------------------------------------
                 # Hybrid Execution Block
                 # ---------------------------------------------------------
                 
                 # 1. Submit Parallel Tasks (ThreadPool)
-                futures = {}
                 if self.parallel_strategies:
-                    # Executor is now reused
-                    for name in self.parallel_strategies:
-                        strategy_obj = self.strategies[name]
-                        # Use ISOLATED session path for parallel execution
-                        session_path = self.config.SESSIONS_DIR / task_name / paper_id / f"{name}.json"
-                        
-                        future = executor.submit(strategy_obj.process, title, abstract, session_path)
-                        futures[future] = name
-                    
-                    # Wait for parallel tasks to complete and collect results
-                    for future in as_completed(futures):
-                        name = futures[future]
-                        try:
-                            extracted = future.result()
-                        except Exception as e:
-                            if isinstance(e, (FileNotFoundError, ValueError)):
-                                self._raise_fatal_strategy_error(name, e)
-                            extracted = {"Error": str(e)}
-                        
-                        res_row = base_row.copy()
-                        res_row.update(extracted)
-                        results_lists[name].append(res_row)
+                    self._run_parallel_strategies(
+                        executor,
+                        task_name,
+                        paper_id,
+                        title,
+                        abstract,
+                        base_row,
+                        results_lists,
+                    )
 
                 # 2. Execute Serial Tasks (Main Thread)
                 # CRITICAL: Do NOT pass session_path (or pass None) to reuse the shared memory object
                 # This ensures Long Context memory is maintained across papers.
-                for name in self.serial_strategies:
-                    strategy_obj = self.strategies[name]
-                    try:
-                        extracted = strategy_obj.process(title, abstract, session_path=None)
-                    except Exception as e:
-                        if isinstance(e, (FileNotFoundError, ValueError)):
-                            self._raise_fatal_strategy_error(name, e)
-                        extracted = {"Error": str(e)}
-                    
-                    res_row = base_row.copy()
-                    res_row.update(extracted)
-                    results_lists[name].append(res_row)
+                self._run_serial_strategies(title, abstract, base_row, results_lists)
                 
                 # ---------------------------------------------------------
                 
                 # Save periodically
                 if (index + 1) % 10 == 0 or (index + 1) == len(df):
-                    for name, res_list in results_lists.items():
-                        if res_list:
-                            temp_df = pd.DataFrame(res_list)
-                            temp_df.to_excel(output_files[name], index=False, engine="openpyxl")
+                    self._save_legacy_results(output_files, results_lists)
                     
         print(f"Done. All results saved.")
 

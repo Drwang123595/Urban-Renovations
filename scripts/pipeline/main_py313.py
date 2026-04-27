@@ -631,6 +631,217 @@ def write_manifests_for_results(
         write_prompt_manifest(results["merged"], merged_manifest)
 
 
+def resolve_selected_shots(
+    args,
+    strategy_registry: PromptStrategyRegistry,
+    urban_enabled,
+    spatial_enabled,
+) -> tuple[str, str]:
+    urban_default = Config.DEFAULT_SHOT_MODE if Config.DEFAULT_SHOT_MODE in urban_enabled else urban_enabled[0]
+    spatial_default = Config.DEFAULT_SHOT_MODE if Config.DEFAULT_SHOT_MODE in spatial_enabled else spatial_enabled[0]
+
+    if args.task == TaskType.URBAN_RENEWAL:
+        chosen = args.urban_shot or args.shot
+        if chosen:
+            urban_shot = normalize_shot_mode(
+                chosen,
+                strategy_registry,
+                urban_enabled,
+                theme="urban_renewal",
+                allow_candidate=args.allow_candidate,
+            )
+        elif urban_method_requires_prompt(
+            args.urban_method,
+            hybrid_llm_assist_enabled=args.hybrid_llm_assist,
+        ):
+            urban_shot = (
+                urban_default
+                if args.non_interactive
+                else select_shot_mode(
+                    registry=strategy_registry,
+                    enabled_modes=urban_enabled,
+                    default_mode=urban_default,
+                    theme="urban_renewal",
+                    label="urban_renewal",
+                    allow_candidate=args.allow_candidate,
+                )
+            )
+        else:
+            urban_shot = urban_default
+        return urban_shot, spatial_default
+
+    if args.task == TaskType.SPATIAL:
+        chosen = args.spatial_shot or args.shot
+        spatial_shot = (
+            normalize_shot_mode(
+                chosen,
+                strategy_registry,
+                spatial_enabled,
+                theme="spatial",
+                allow_candidate=args.allow_candidate,
+            )
+            if chosen
+            else (
+                spatial_default
+                if args.non_interactive
+                else select_shot_mode(
+                    registry=strategy_registry,
+                    enabled_modes=spatial_enabled,
+                    default_mode=spatial_default,
+                    theme="spatial",
+                    label="spatial",
+                    allow_candidate=args.allow_candidate,
+                )
+            )
+        )
+        return urban_default, spatial_shot
+
+    urban_chosen = args.urban_shot or args.shot
+    spatial_chosen = args.spatial_shot or args.shot
+    if urban_chosen:
+        urban_shot = normalize_shot_mode(
+            urban_chosen,
+            strategy_registry,
+            urban_enabled,
+            theme="urban_renewal",
+            allow_candidate=args.allow_candidate,
+        )
+    elif not urban_method_requires_prompt(
+        args.urban_method,
+        hybrid_llm_assist_enabled=args.hybrid_llm_assist,
+    ):
+        urban_shot = urban_default
+    else:
+        urban_shot = (
+            urban_default
+            if args.non_interactive
+            else select_shot_mode(
+                registry=strategy_registry,
+                enabled_modes=urban_enabled,
+                default_mode=urban_default,
+                theme="urban_renewal",
+                label="urban_renewal",
+                allow_candidate=args.allow_candidate,
+            )
+        )
+
+    spatial_shot = (
+        normalize_shot_mode(
+            spatial_chosen,
+            strategy_registry,
+            spatial_enabled,
+            theme="spatial",
+            allow_candidate=args.allow_candidate,
+        )
+        if spatial_chosen
+        else (
+            spatial_default
+            if args.non_interactive
+            else select_shot_mode(
+                registry=strategy_registry,
+                enabled_modes=spatial_enabled,
+                default_mode=spatial_default,
+                theme="spatial",
+                label="spatial",
+                allow_candidate=args.allow_candidate,
+            )
+        )
+    )
+    return urban_shot, spatial_shot
+
+
+def print_run_configuration(
+    args,
+    *,
+    dataset_id: str,
+    truth_file: str,
+    session_policy: str,
+    urban_definition: PromptStrategyDefinition,
+    spatial_definition: PromptStrategyDefinition,
+    urban_shot: str,
+    spatial_shot: str,
+) -> None:
+    print(f"\n{'=' * 60}")
+    print("Urban Renovation Literature Auto-Identification System")
+    print(f"{'=' * 60}")
+    print(f"Input: {args.input}")
+    print(f"Experiment Track: {args.experiment_track}")
+    print(f"Dataset ID: {dataset_id}")
+    print(f"Truth File: {truth_file or 'UNBOUND'}")
+    print(f"Session Policy: {session_policy}")
+    print(f"Order ID: {args.order_id}")
+    print(f"Order Seed: {args.order_seed if args.order_seed is not None else 'N/A'}")
+    print(f"Max Samples / Window: {args.max_samples_per_window}")
+    if args.task == TaskType.BOTH:
+        print("Isolation: strict serial (urban -> spatial)")
+        print(f"Urban Method: {args.urban_method.value}")
+        if args.urban_method == UrbanMethod.THREE_STAGE_HYBRID:
+            print(f"Hybrid LLM Assist: {'on' if args.hybrid_llm_assist else 'off'}")
+        print(f"Urban Mode: {urban_definition.name}")
+        urban_strategy_proof = render_strategy_proof(args.urban_shot or args.shot or urban_shot, urban_definition)
+        if not urban_method_requires_prompt(
+            args.urban_method,
+            hybrid_llm_assist_enabled=args.hybrid_llm_assist,
+        ):
+            urban_strategy_proof += " (unused by current urban method)"
+        print(f"Urban Strategy Proof: {urban_strategy_proof}")
+        print(f"Spatial Mode: {spatial_definition.name}")
+        print(
+            f"Spatial Strategy Proof: {render_strategy_proof(args.spatial_shot or args.shot or spatial_shot, spatial_definition)}"
+        )
+    elif args.task == TaskType.URBAN_RENEWAL:
+        print(f"Urban Method: {args.urban_method.value}")
+        if args.urban_method == UrbanMethod.THREE_STAGE_HYBRID:
+            print(f"Hybrid LLM Assist: {'on' if args.hybrid_llm_assist else 'off'}")
+        print(f"Mode: {urban_definition.name}")
+        urban_strategy_proof = render_strategy_proof(args.urban_shot or args.shot or urban_shot, urban_definition)
+        if not urban_method_requires_prompt(
+            args.urban_method,
+            hybrid_llm_assist_enabled=args.hybrid_llm_assist,
+        ):
+            urban_strategy_proof += " (unused by current urban method)"
+        print(f"Strategy Proof: {urban_strategy_proof}")
+    else:
+        print(f"Mode: {spatial_definition.name}")
+        print(f"Strategy Proof: {render_strategy_proof(args.spatial_shot or args.shot or spatial_shot, spatial_definition)}")
+    print(f"Task: {args.task.value}")
+    print(f"Output: {args.output or 'AUTO'}")
+
+
+def run_selected_task(router: TaskRouter, args, run_context: dict) -> dict:
+    if args.task == TaskType.URBAN_RENEWAL:
+        print("Running Urban Renewal Classification only...")
+        return router.run_urban_renewal(
+            input_file=args.input,
+            output_file=args.output,
+            limit=args.limit,
+            run_context=run_context,
+        )
+    if args.task == TaskType.SPATIAL:
+        print("Running Spatial Attribute Extraction only...")
+        return router.run_spatial(
+            input_file=args.input,
+            output_file=args.output,
+            limit=args.limit,
+            run_context=run_context,
+        )
+
+    print("Running both tasks (Urban Renewal + Spatial)...")
+    result = router.run_both(
+        input_file=args.input,
+        output_file=args.output,
+        limit=args.limit,
+        run_context=run_context,
+    )
+    print(f"\n{'=' * 60}")
+    print("Results:")
+    print(f"  Urban Renewal: {result['urban_renewal']}")
+    print(f"  Spatial: {result['spatial']}")
+    if result.get("merged"):
+        print(f"  Merged: {result['merged']}")
+    return result
+
+
 def main():
     Config.load_env()
     Config.validate_runtime_environment(require_py313=True, warn_on_minor_drift=True)

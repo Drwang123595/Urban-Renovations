@@ -8,6 +8,17 @@ import yaml
 
 
 ALLOWED_LIFECYCLES = {"candidate", "stable", "deprecated"}
+REQUIRED_STRATEGY_FIELDS = (
+    "key",
+    "name",
+    "theme",
+    "template_file",
+    "enabled",
+    "version",
+    "lifecycle",
+    "owner",
+    "change_summary",
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +34,146 @@ class PromptStrategyDefinition:
     lifecycle: str
     owner: str
     change_summary: str
+
+
+def _validate_registry_root(raw: Dict) -> tuple[List[str], List[Dict]]:
+    themes = raw.get("themes")
+    raw_strategies = raw.get("strategies")
+
+    if not isinstance(themes, list) or not themes:
+        raise ValueError("Invalid strategy registry: themes must be a non-empty list")
+    if not isinstance(raw_strategies, list) or not raw_strategies:
+        raise ValueError("Invalid strategy registry: strategies must be a non-empty list")
+    return themes, raw_strategies
+
+
+def _missing_required_fields(item: Dict) -> List[str]:
+    missing_fields = []
+    for field_name in REQUIRED_STRATEGY_FIELDS:
+        value = item.get(field_name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing_fields.append(field_name)
+    return missing_fields
+
+
+def _normalize_aliases(name: str, aliases: List[str]) -> List[str]:
+    normalized_aliases: List[str] = []
+    seen_aliases = set()
+    for alias in aliases:
+        if not isinstance(alias, str) or not alias.strip():
+            raise ValueError(
+                f"Invalid strategy registry: aliases must be non-empty strings strategy={name}"
+            )
+        alias_value = alias.strip()
+        if alias_value in seen_aliases:
+            continue
+        seen_aliases.add(alias_value)
+        normalized_aliases.append(alias_value)
+    return normalized_aliases
+
+
+def _build_strategy_definition(
+    item: Dict,
+    themes: List[str],
+    strategy_defs: Dict[str, PromptStrategyDefinition],
+    name_index: Dict[str, Dict[str, str]],
+) -> PromptStrategyDefinition:
+    if not isinstance(item, dict):
+        raise ValueError("Invalid strategy registry: every strategy definition must be a mapping")
+
+    name = item.get("name")
+    key = item.get("key")
+    theme = item.get("theme")
+    template_file = item.get("template_file")
+    enabled = item.get("enabled")
+    aliases = item.get("aliases", [])
+    description = item.get("description", "")
+    version = item.get("version")
+    lifecycle = item.get("lifecycle")
+    owner = item.get("owner")
+    change_summary = item.get("change_summary")
+
+    missing_fields = _missing_required_fields(item)
+    if missing_fields:
+        raise ValueError(
+            f"Invalid strategy registry: missing required fields "
+            f"strategy={name or '<unknown>'}, fields={', '.join(missing_fields)}"
+        )
+
+    if key in strategy_defs:
+        raise ValueError(f"Invalid strategy registry: duplicate strategy key={key}")
+    if not isinstance(theme, str):
+        raise ValueError(f"Invalid strategy registry: theme must be a string strategy={name}")
+    if theme not in themes:
+        raise ValueError(f"Invalid strategy registry: unknown theme strategy={name}, theme={theme}")
+    if not isinstance(template_file, str) or not template_file.strip():
+        raise ValueError(
+            f"Invalid strategy registry: template_file must be a non-empty string strategy={name}"
+        )
+    if Path(template_file).name != template_file:
+        raise ValueError(
+            f"Invalid strategy registry: template_file must be a file name within its theme directory "
+            f"strategy={name}, template_file={template_file}"
+        )
+    if not isinstance(enabled, bool):
+        raise ValueError(f"Invalid strategy registry: enabled must be bool strategy={name}")
+    if not isinstance(aliases, list):
+        raise ValueError(f"Invalid strategy registry: aliases must be a list strategy={name}")
+    if "." not in key:
+        raise ValueError(f"Invalid strategy registry: key must include theme prefix key={key}")
+    key_theme = key.split(".", 1)[0]
+    if key_theme != theme:
+        raise ValueError(
+            f"Invalid strategy registry: key/theme mismatch key={key}, theme={theme}"
+        )
+    if lifecycle not in ALLOWED_LIFECYCLES:
+        allowed = ", ".join(sorted(ALLOWED_LIFECYCLES))
+        raise ValueError(
+            f"Invalid strategy registry: lifecycle must be one of {allowed} "
+            f"strategy={name}, lifecycle={lifecycle}"
+        )
+    if name in name_index[theme]:
+        raise ValueError(f"Invalid strategy registry: duplicate strategy name theme={theme}, name={name}")
+    if key in aliases:
+        raise ValueError(f"Invalid strategy registry: alias cannot equal key key={key}")
+
+    return PromptStrategyDefinition(
+        key=key,
+        name=name,
+        theme=theme,
+        template_file=template_file,
+        enabled=enabled,
+        aliases=_normalize_aliases(name, aliases),
+        description=str(description or ""),
+        version=str(version).strip(),
+        lifecycle=lifecycle,
+        owner=str(owner).strip(),
+        change_summary=str(change_summary).strip(),
+    )
+
+
+def _build_alias_index(
+    themes: List[str],
+    strategy_defs: Dict[str, PromptStrategyDefinition],
+    name_index: Dict[str, Dict[str, str]],
+) -> Dict[str, Dict[str, str]]:
+    alias_index: Dict[str, Dict[str, str]] = {theme: {} for theme in themes}
+    for key, definition in strategy_defs.items():
+        scoped_aliases = alias_index[definition.theme]
+        for alias in definition.aliases:
+            if alias in name_index[definition.theme]:
+                raise ValueError(
+                    f"Invalid strategy registry: alias conflicts with strategy name "
+                    f"alias={alias}, theme={definition.theme}"
+                )
+            existing_owner = scoped_aliases.get(alias)
+            if existing_owner and existing_owner != key:
+                raise ValueError(
+                    f"Invalid strategy registry: duplicate alias alias={alias}, "
+                    f"theme={definition.theme}, owners={existing_owner}|{key}"
+                )
+            scoped_aliases[alias] = key
+    return alias_index
 
 
 class PromptStrategyRegistry:
@@ -49,134 +200,22 @@ class PromptStrategyRegistry:
 
     @classmethod
     def _from_dict(cls, raw: Dict) -> "PromptStrategyRegistry":
-        themes = raw.get("themes")
-        raw_strategies = raw.get("strategies")
-
-        if not isinstance(themes, list) or not themes:
-            raise ValueError("Invalid strategy registry: themes must be a non-empty list")
-        if not isinstance(raw_strategies, list) or not raw_strategies:
-            raise ValueError("Invalid strategy registry: strategies must be a non-empty list")
+        themes, raw_strategies = _validate_registry_root(raw)
 
         strategy_defs: Dict[str, PromptStrategyDefinition] = {}
-        alias_index: Dict[str, Dict[str, str]] = {theme: {} for theme in themes}
         name_index: Dict[str, Dict[str, str]] = {theme: {} for theme in themes}
 
         for item in raw_strategies:
-            if not isinstance(item, dict):
-                raise ValueError("Invalid strategy registry: every strategy definition must be a mapping")
-
-            name = item.get("name")
-            key = item.get("key")
-            theme = item.get("theme")
-            template_file = item.get("template_file")
-            enabled = item.get("enabled")
-            aliases = item.get("aliases", [])
-            description = item.get("description", "")
-            version = item.get("version")
-            lifecycle = item.get("lifecycle")
-            owner = item.get("owner")
-            change_summary = item.get("change_summary")
-
-            missing_fields = []
-            for field_name, value in (
-                ("key", key),
-                ("name", name),
-                ("theme", theme),
-                ("template_file", template_file),
-                ("enabled", enabled),
-                ("version", version),
-                ("lifecycle", lifecycle),
-                ("owner", owner),
-                ("change_summary", change_summary),
-            ):
-                if value is None or (isinstance(value, str) and not value.strip()):
-                    missing_fields.append(field_name)
-            if missing_fields:
-                raise ValueError(
-                    f"Invalid strategy registry: missing required fields "
-                    f"strategy={name or '<unknown>'}, fields={', '.join(missing_fields)}"
-                )
-
-            if key in strategy_defs:
-                raise ValueError(f"Invalid strategy registry: duplicate strategy key={key}")
-            if not isinstance(theme, str):
-                raise ValueError(f"Invalid strategy registry: theme must be a string strategy={name}")
-            if theme not in themes:
-                raise ValueError(f"Invalid strategy registry: unknown theme strategy={name}, theme={theme}")
-            if not isinstance(template_file, str) or not template_file.strip():
-                raise ValueError(
-                    f"Invalid strategy registry: template_file must be a non-empty string strategy={name}"
-                )
-            if Path(template_file).name != template_file:
-                raise ValueError(
-                    f"Invalid strategy registry: template_file must be a file name within its theme directory "
-                    f"strategy={name}, template_file={template_file}"
-                )
-            if not isinstance(enabled, bool):
-                raise ValueError(f"Invalid strategy registry: enabled must be bool strategy={name}")
-            if not isinstance(aliases, list):
-                raise ValueError(f"Invalid strategy registry: aliases must be a list strategy={name}")
-            if "." not in key:
-                raise ValueError(f"Invalid strategy registry: key must include theme prefix key={key}")
-            key_theme = key.split(".", 1)[0]
-            if key_theme != theme:
-                raise ValueError(
-                    f"Invalid strategy registry: key/theme mismatch key={key}, theme={theme}"
-                )
-            if lifecycle not in ALLOWED_LIFECYCLES:
-                allowed = ", ".join(sorted(ALLOWED_LIFECYCLES))
-                raise ValueError(
-                    f"Invalid strategy registry: lifecycle must be one of {allowed} "
-                    f"strategy={name}, lifecycle={lifecycle}"
-                )
-            if name in name_index[theme]:
-                raise ValueError(f"Invalid strategy registry: duplicate strategy name theme={theme}, name={name}")
-            if key in aliases:
-                raise ValueError(f"Invalid strategy registry: alias cannot equal key key={key}")
-
-            normalized_aliases: List[str] = []
-            seen_aliases = set()
-            for alias in aliases:
-                if not isinstance(alias, str) or not alias.strip():
-                    raise ValueError(
-                        f"Invalid strategy registry: aliases must be non-empty strings strategy={name}"
-                    )
-                alias_value = alias.strip()
-                if alias_value in seen_aliases:
-                    continue
-                seen_aliases.add(alias_value)
-                normalized_aliases.append(alias_value)
-
-            strategy_defs[key] = PromptStrategyDefinition(
-                key=key,
-                name=name,
-                theme=theme,
-                template_file=template_file,
-                enabled=enabled,
-                aliases=normalized_aliases,
-                description=str(description or ""),
-                version=str(version).strip(),
-                lifecycle=lifecycle,
-                owner=str(owner).strip(),
-                change_summary=str(change_summary).strip(),
+            definition = _build_strategy_definition(
+                item=item,
+                themes=themes,
+                strategy_defs=strategy_defs,
+                name_index=name_index,
             )
-            name_index[theme][name] = key
+            strategy_defs[definition.key] = definition
+            name_index[definition.theme][definition.name] = definition.key
 
-        for key, definition in strategy_defs.items():
-            scoped_aliases = alias_index[definition.theme]
-            for alias in definition.aliases:
-                if alias in name_index[definition.theme]:
-                    raise ValueError(
-                        f"Invalid strategy registry: alias conflicts with strategy name "
-                        f"alias={alias}, theme={definition.theme}"
-                    )
-                existing_owner = scoped_aliases.get(alias)
-                if existing_owner and existing_owner != key:
-                    raise ValueError(
-                        f"Invalid strategy registry: duplicate alias alias={alias}, "
-                        f"theme={definition.theme}, owners={existing_owner}|{key}"
-                    )
-                scoped_aliases[alias] = key
+        alias_index = _build_alias_index(themes, strategy_defs, name_index)
 
         return cls(
             themes=themes,
