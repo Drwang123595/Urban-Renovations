@@ -1,0 +1,106 @@
+themes:
+  - urban_renewal
+  - spatial
+strategies:
+  - key: urban_renewal.zero
+    name: zero
+    theme: urban_renewal
+    template_file: zero.yaml
+    enabled: true
+    aliases: []
+    description: Zero-shot template for urban renewal extraction
+    version: 1.1.0
+    lifecycle: stable
+    owner: system
+    change_summary: Added auxiliary-metadata guidance so Keywords, WoS Categories, and Research Areas can support but not override title-abstract judgment in the hybrid urban-renewal pipeline.
+  - key: urban_renewal.one
+    name: one
+    theme: urban_renewal
+    template_file: one.yaml
+    enabled: true
+    aliases: []
+    description: One-shot template for urban renewal extraction
+    version: 1.1.0
+    lifecycle: stable
+    owner: system
+    change_summary: Added auxiliary-metadata guidance so Keywords, WoS Categories, and Research Areas can support but not override title-abstract judgment in the hybrid urban-renewal pipeline.
+  - key: urban_renewal.few
+    name: few
+    theme: urban_renewal
+    template_file: few.yaml
+    enabled: true
+    aliases: []
+    description: Few-shot template for urban renewal extraction
+    version: 2.4.0
+    lifecycle: stable
+    owner: system
+    change_summary: Added auxiliary-metadata guidance and aligned the stable few-shot prompt with the new hybrid pipeline where Keywords, WoS Categories, and Research Areas inform fallback adjudication without forcing positives.
+  - key: urban_renewal.cot
+    name: cot
+    theme: urban_renewal
+    template_file: cot.yaml
+    enabled: true
+    aliases:
+      - chain_of_thought
+    description: Chain-of-thought template for urban renewal extraction
+    version: 1.1.0
+    lifecycle: stable
+    owner: system
+    change_summary: Added auxiliary-metadata guidance so chain-of-thought fallback can use Keywords, WoS Categories, and Research Areas as supporting evidence only.
+  - key: urban_renewal.reflection
+    name: reflection
+    theme: urban_renewal
+    template_file: reflection.yaml
+    enabled: false
+    aliases:
+      - self_check
+    description: Archived reflection prompt retained only for audit and legacy inspection.
+    version: 0.9.0
+    lifecycle: deprecated
+    owner: system
+    change_summary: Moved legacy reflection prompt under the governed registry and removed it from runnable prompt options.
+  - key: spatial.zero
+    name: zero
+    theme: spatial
+    template_file: zero.yaml
+    enabled: true
+    aliases: []
+    description: Zero-shot template for spatial extraction
+    version: 1.0.0
+    lifecycle: stable
+    owner: system
+    change_summary: Initial stable spatial zero-shot template migrated into governed registry.
+  - key: spatial.one
+    name: one
+    theme: spatial
+    template_file: one.yaml
+    enabled: true
+    aliases: []
+    description: One-shot template for spatial extraction
+    version: 1.0.0
+    lifecycle: stable
+    owner: system
+    change_summary: Initial stable spatial one-shot template migrated into governed registry.
+  - key: spatial.few
+    name: few
+    theme: spatial
+    template_file: few.yaml
+    enabled: true
+    aliases: []
+    description: Few-shot template for spatial extraction
+    version: 1.0.0
+    lifecycle: stable
+    owner: system
+    change_summary: Initial stable spatial few-shot template migrated into governed registry.
+  - key: spatial.cot
+    name: cot
+    theme: spatial
+    template_file: cot.yaml
+    enabled: true
+    aliases:
+      - spatial_chain_of_thought
+    description: Chain-of-thought template for spatial extraction
+    version: 1.0.0
+    lifecycle: stable
+    owner: system
+    change_summary: Initial stable spatial chain-of-thought template migrated into governed registry.

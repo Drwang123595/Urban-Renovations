@@ -1,8 +1,7 @@
 from typing import Dict, Any, Optional, Union
-import re
 from pathlib import Path
 from .base import ExtractionStrategy
-from ..memory import ConversationMemory
+from ..runtime.memory import ConversationMemory
 
 class CoTStrategy(ExtractionStrategy):
     def process(self, title: str, abstract: str, session_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:

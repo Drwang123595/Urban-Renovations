@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*$py.class
+*.so
+.Python
+*.egg-info/
+urban_renovation.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+.venv2/
+.venv3/
+.venv1/
+.venv-*/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local assistant / tool metadata
+.trae/
+.codex-tmp/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# Temporary files
+test_output.txt
+test_error.txt
+test_result.json
+evaluate_1000_results.json
+evaluate_1000_log.txt
+*.tmp
+*.temp
+
+# Runtime artifacts
+/history/
+/output/
+/Result/
+/tmp/
+/Data/
+/data/
+/测试数据/
+*.prompt_manifest.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Notebooks
+.ipynb_checkpoints/

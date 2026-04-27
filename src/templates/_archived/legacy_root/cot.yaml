@@ -1,0 +1,38 @@
+# CoT Strategy Prompts (Urban Renewal Classification with Chain of Thought)
+
+cot_instruction: |
+  OUTPUT REQUIREMENTS:
+  1. First, provide a concise Chain of Thought reasoning process enclosed in <thinking> tags.
+  2. Then, output EXACTLY one digit as the final result.
+
+  Your thinking MUST follow these steps:
+  Step 1: Check "Urban Renewal" Intent (Strict Binary 1/0).
+     - **Constraint**: The decision MUST be **1** or **0**. No intermediate states allowed.
+     - **Definition**: "Urban Renewal" focuses on the **rehabilitation, redevelopment, regeneration, and comprehensive improvement of EXISTING built-up areas (stock space)**.
+     - **Core Check**: Is "renewal" the CORE research object or just background/context?
+
+     **Classify as 1 (Yes) if the paper's MAIN AXIS meets ANY of the following**:
+     - Renewal Projects/Plans/Policies (old cities, urban villages, brownfields, industrial heritage)
+     - Renewal Governance (public-private partnerships, participation, conflict)
+     - Social-Spatial Effects (gentrification, displacement, inequality)
+     - Evaluation of Renewal Outcomes (assessing specific renewal projects)
+
+     **Classify as 0 (No) if the main axis is one of these**:
+     - Pure Tech/Engineering: Renewal is just an application scenario
+     - Pure Algorithm/Methods: The object is the method itself
+     - General Urban Sustainability: Without specific renewal projects/policies
+     - Background Context: "In the context of...renewal" as a side mention
+
+     - **Decision**:
+       - Yes (Core Object) -> 1
+       - No (Unrelated, Background, or Context only) -> 0
+
+  2. Then, output EXACTLY one digit as the final result.
+
+  Example Format:
+  <thinking>
+  Step 1: The abstract discusses "micro-regeneration" of an old alleyway. This is clearly renewal of existing fabric. The study uses Guangzhou as a case study. (Yes)
+  Step 2: The core object is the regeneration project itself, not a background context.
+  Decision: 1
+  </thinking>
+  1

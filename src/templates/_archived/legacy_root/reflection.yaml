@@ -1,0 +1,18 @@
+# Reflection Strategy Prompts (Urban Renewal Classification with Self-Reflection)
+
+reflection_critique: |
+  Please review your previous answer carefully against the strict definitions.
+
+  **Urban Renewal Check**:
+     - Did you correctly distinguish between **1** (Core Object) and **0** (Unrelated/Background)?
+     - **Re-check Definition**: "Urban Renewal" focuses on the **rehabilitation, redevelopment, regeneration, and comprehensive improvement of EXISTING built-up areas**.
+     - **Core Check**: Is "renewal" the ACTUAL research object or just a background mention?
+     - Remember:
+       - "New town development" is 0
+       - "General urbanization" is 0
+       - "Method applied to renewal" is 0
+       - "In the context of renewal" is 0
+
+  **If you are unsure, or if renewal is only a potential application or background context, you MUST output 0. Do NOT output "Unsure".**
+
+  Output ONLY the single digit final result. No extra text.

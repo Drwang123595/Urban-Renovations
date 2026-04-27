@@ -2,9 +2,9 @@ import re
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
 from .base import ExtractionStrategy
-from ..llm_client import DeepSeekClient
-from ..prompts import PromptGenerator
-from ..memory import ConversationMemory
+from ..prompting.generator import PromptGenerator
+from ..runtime.llm_client import DeepSeekClient
+from ..runtime.memory import ConversationMemory
 
 class StepwiseLongContextStrategy(ExtractionStrategy):
     def __init__(

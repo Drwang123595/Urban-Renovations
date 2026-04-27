@@ -1,0 +1,404 @@
+[
+  {
+    "title": "Procedural justice for whom? A case study of a densification project",
+    "abstract": "The study examines resident perceptions of justice and participation in a neighborhood densification project within an existing urban district.",
+    "expected_label": 1,
+    "tags": ["densification", "governance_policy"]
+  },
+  {
+    "title": "Critical success factors for the implementation of urban regeneration REITs",
+    "abstract": "This paper identifies financing and governance factors shaping implementation of urban regeneration REITs in existing built-up areas.",
+    "expected_label": 1,
+    "tags": ["finance_reit", "governance_policy"]
+  },
+  {
+    "title": "Street regeneration for thermal comfort in an old district",
+    "abstract": "The paper evaluates how redesigning and regenerating streets in an old district affects habitability and resilience.",
+    "expected_label": 1,
+    "tags": ["public_realm", "method_design_positive"]
+  },
+  {
+    "title": "Social network conservation in historical urban areas",
+    "abstract": "This article studies conservation-led renewal in historical urban areas and its effects on resident social networks.",
+    "expected_label": 1,
+    "tags": ["heritage_conservation", "public_realm"]
+  },
+  {
+    "title": "Blight intervention in shrinking cities: demolition or rehabilitation?",
+    "abstract": "The study compares demolition and rehabilitation policies for vacant properties in declining neighborhoods.",
+    "expected_label": 1,
+    "tags": ["blight_demolition", "governance_policy"]
+  },
+  {
+    "title": "State-led gentrification and displacement under urban renewal",
+    "abstract": "The article analyzes how state-supported renewal programs produce displacement and self-respect harms among existing residents.",
+    "expected_label": 1,
+    "tags": ["gentrification_effect", "governance_policy"]
+  },
+  {
+    "title": "Brownfield waterfront redevelopment and coalition politics",
+    "abstract": "This paper examines redevelopment of an abandoned waterfront brownfield through public-private coalition building.",
+    "expected_label": 1,
+    "tags": ["brownfield_reuse", "governance_policy"]
+  },
+  {
+    "title": "Relocation outcomes in an urban village renewal project",
+    "abstract": "The study evaluates relocation, compensation, and neighborhood change after a specific urban village renewal intervention.",
+    "expected_label": 1,
+    "tags": ["gentrification_effect", "redevelopment"]
+  },
+  {
+    "title": "Historic district revitalization through adaptive reuse",
+    "abstract": "The article focuses on revitalization of a historic district through adaptive reuse and conservation-oriented planning.",
+    "expected_label": 1,
+    "tags": ["heritage_conservation", "adaptive_reuse"]
+  },
+  {
+    "title": "Implementation pathways for old community renewal",
+    "abstract": "This paper studies policy tools, delivery mechanisms, and resident participation in old community renewal programs.",
+    "expected_label": 1,
+    "tags": ["governance_policy", "redevelopment"]
+  },
+  {
+    "title": "Exploring lay views on physical activity and public health in East Belfast",
+    "abstract": "Using an urban regeneration project in East Belfast, this paper evaluates how regeneration affects physical activity and community health.",
+    "expected_label": 1,
+    "tags": ["health_social_effects", "governance_policy"]
+  },
+  {
+    "title": "The impact of urban renewal on land surface temperature changes",
+    "abstract": "The paper uses multi-source remote sensing to evaluate temperature changes caused by urban renewal in Guangzhou.",
+    "expected_label": 1,
+    "tags": ["remote_sensing_method", "method_design_positive"]
+  },
+  {
+    "title": "Indian Bus Rapid Transit Systems Funded by the Jawaharlal Nehru National Urban Renewal Mission",
+    "abstract": "This paper reviews planning, implementation, and operation of bus rapid transit systems funded under a national urban renewal mission.",
+    "expected_label": 1,
+    "tags": ["governance_policy", "transport_under_renewal"]
+  },
+  {
+    "title": "Optimization of drainage systems for flooding mitigation in an urban renewal project",
+    "abstract": "The study proposes an optimization model for drainage and impervious surfaces within a concrete urban renewal case.",
+    "expected_label": 1,
+    "tags": ["optimization_method", "method_design_positive"]
+  },
+  {
+    "title": "Automatic identification of bottlenecks for ambulance passage on urban streets",
+    "abstract": "This article develops a deep learning method to identify ambulance bottlenecks as a key task in urban renewal and street governance initiatives.",
+    "expected_label": 1,
+    "tags": ["optimization_method", "public_realm"]
+  },
+  {
+    "title": "Urban Built Environment Assessment Based on Scene Understanding of High-Resolution Remote Sensing Imagery",
+    "abstract": "The paper proposes a built-environment assessment method and explicitly frames it as decision support for urban renewal improvement.",
+    "expected_label": 1,
+    "tags": ["remote_sensing_method", "method_design_positive"]
+  },
+  {
+    "title": "Bridging heritage conservation and energy efficiency in historic social housing",
+    "abstract": "This study presents a retrofitting framework for historic social housing and positions it as an urban regeneration model for municipalities.",
+    "expected_label": 1,
+    "tags": ["heritage_conservation", "adaptive_reuse"]
+  },
+  {
+    "title": "Pocket park design as part of inner-city regeneration",
+    "abstract": "The paper evaluates pocket park design and social value in a named inner-city regeneration project.",
+    "expected_label": 1,
+    "tags": ["public_realm", "health_social_effects"]
+  },
+  {
+    "title": "Area-based implementation of urban regeneration policy in Poland",
+    "abstract": "The article studies how urban regeneration policy is implemented across functional urban areas and what governance bottlenecks emerge.",
+    "expected_label": 1,
+    "tags": ["governance_policy", "program_law"]
+  },
+  {
+    "title": "Property-led regeneration and limits of redevelopment coalitions",
+    "abstract": "The study analyzes property-led regeneration, local authorities, and redevelopment coalitions in affected neighborhoods.",
+    "expected_label": 1,
+    "tags": ["governance_policy", "finance_reit"]
+  },
+  {
+    "title": "Re-urbanisation in regenerated areas of Manchester and Glasgow",
+    "abstract": "The article examines new residents and sustainability problems in regenerated areas of Manchester and Glasgow.",
+    "expected_label": 1,
+    "tags": ["gentrification_effect", "health_social_effects"]
+  },
+  {
+    "title": "Housing rights regimes amid urban renewal in Shanghai and Mumbai",
+    "abstract": "This article examines housing rights, demolitions, and activism within ongoing urban renewal in Shanghai and Mumbai.",
+    "expected_label": 1,
+    "tags": ["governance_policy", "gentrification_effect"]
+  },
+  {
+    "title": "Evaluation of environmental quality after redevelopment of an industrial waterfront",
+    "abstract": "The study evaluates environmental quality and resident experience after redevelopment of a named industrial waterfront district.",
+    "expected_label": 1,
+    "tags": ["method_design_positive", "brownfield_reuse"]
+  },
+  {
+    "title": "Renewal law and seismic upgrading decisions in Turkish neighborhoods",
+    "abstract": "The paper analyzes how the urban renewal law shapes neighborhood-level seismic upgrading and redevelopment decisions.",
+    "expected_label": 1,
+    "tags": ["program_law", "governance_policy"]
+  },
+  {
+    "title": "Creative industry relocation in a docklands regeneration program",
+    "abstract": "The article evaluates relocation outcomes and workspace loss in a named docklands regeneration program.",
+    "expected_label": 1,
+    "tags": ["gentrification_effect", "governance_policy"]
+  },
+  {
+    "title": "Appropriate public-realm design for the blind and partially sighted",
+    "abstract": "The article evaluates accessibility-oriented public-realm design in regenerated city centers and treats regeneration-led street change as the direct object.",
+    "expected_label": 1,
+    "tags": ["public_realm", "method_design_positive"]
+  },
+  {
+    "title": "Urban regeneration and sustainable communities: the role of networks, innovation, and creativity",
+    "abstract": "This paper studies partnerships, innovation, and governance mechanisms inside urban regeneration programs and evaluates their role in sustainable communities.",
+    "expected_label": 1,
+    "tags": ["governance_policy", "program_law"]
+  },
+  {
+    "title": "Beautiful urbanism: gender, landscape, and contestation in Latino Chicago's age of urban renewal",
+    "abstract": "The paper analyzes how urban renewal reshaped landscape, gendered experience, and contestation in Latino Chicago, treating renewal as the central process under study.",
+    "expected_label": 1,
+    "tags": ["health_social_effects", "social_history"]
+  },
+  {
+    "title": "Urban heat island dynamics from the perspective of urban renewal",
+    "abstract": "The paper analyzes long-run UHI trends and thermal gradients across cities and only frames the issue as relevant to renewal planning.",
+    "expected_label": 0,
+    "tags": ["uhi_climate", "background_only"]
+  },
+  {
+    "title": "Predictive fire models for renewal districts",
+    "abstract": "A machine learning model predicts fire occurrence and may support decision making in renewal areas, but the contribution is methodological.",
+    "expected_label": 0,
+    "tags": ["remote_sensing_method", "optimization_method"]
+  },
+  {
+    "title": "Urban sustainability indicators for future scenarios",
+    "abstract": "This paper develops sustainability indicators for future urban scenarios without any concrete renewal intervention as the object.",
+    "expected_label": 0,
+    "tags": ["general_sustainability", "background_only"]
+  },
+  {
+    "title": "The hotel and the city",
+    "abstract": "The article surveys hotels as part of twentieth-century urbanism and only notes that some were connected to renewal strategies.",
+    "expected_label": 0,
+    "tags": ["urbanism_overview", "background_only"]
+  },
+  {
+    "title": "Underground pedestrian systems for urban sustainability",
+    "abstract": "The study examines underground pedestrian systems as a mobility and sustainability phenomenon, not as a renewal intervention chain.",
+    "expected_label": 0,
+    "tags": ["transport_guideline", "general_sustainability"]
+  },
+  {
+    "title": "Black-Friendly businesses in cities during the Civil Rights Era",
+    "abstract": "This is a historical study of Black business districts and civil-rights-era urban change; renewal is mentioned only as context.",
+    "expected_label": 0,
+    "tags": ["social_history", "background_only"]
+  },
+  {
+    "title": "Archaeological reconstruction of an early mosque",
+    "abstract": "The paper reconstructs an early mosque and attributes it to a historical wave of urban renewal in the eighth century.",
+    "expected_label": 0,
+    "tags": ["archaeology", "social_history"]
+  },
+  {
+    "title": "Optimization of redevelopment candidate blocks using explainable AI",
+    "abstract": "The main contribution is an optimization method for block selection; renewal is primarily the application scenario for the algorithm.",
+    "expected_label": 0,
+    "tags": ["optimization_method", "background_only"]
+  },
+  {
+    "title": "Concrete performance for recycled demolition waste",
+    "abstract": "The paper studies material properties of concrete using waste from renewal and demolition sites, but not renewal itself.",
+    "expected_label": 0,
+    "tags": ["materials_tech", "background_only"]
+  },
+  {
+    "title": "Using demolition wastes from urban regeneration as sensible thermal energy storage material",
+    "abstract": "The paper evaluates thermal storage behavior of demolition wastes from regeneration sites; urban regeneration is only the waste source, not the study object.",
+    "expected_label": 0,
+    "tags": ["materials_tech", "background_only"]
+  },
+  {
+    "title": "Segregated neighborhoods and federal policy in the twentieth century",
+    "abstract": "This article examines segregation and federal housing policy over time without analyzing a concrete renewal intervention.",
+    "expected_label": 0,
+    "tags": ["social_history", "urbanism_overview"]
+  },
+  {
+    "title": "Persistent organic pollutants in the topsoil of a typical urban renewal area",
+    "abstract": "This study maps pollutant distribution and carcinogenic risk in soils from a typical urban renewal area, but does not study renewal itself.",
+    "expected_label": 0,
+    "tags": ["contamination_risk", "background_only"]
+  },
+  {
+    "title": "Distribution and health risk assessment of organochlorine pesticides in industrial site soils",
+    "abstract": "The article evaluates organochlorine pesticide risk in a contaminated industrial site described as part of urban renewal in Beijing.",
+    "expected_label": 0,
+    "tags": ["contamination_risk", "materials_tech"]
+  },
+  {
+    "title": "The Three Santiago Calatrava Bridges in Reggio Emilia, Italy",
+    "abstract": "The paper describes bridge structures and only remarks that the bridges played an important role in urban regeneration.",
+    "expected_label": 0,
+    "tags": ["architecture_object", "background_only"]
+  },
+  {
+    "title": "Gentrification in Hong Kong? Epistemology vs. Ontology",
+    "abstract": "This article debates the concept of gentrification in Hong Kong without studying a concrete renewal intervention chain.",
+    "expected_label": 1,
+    "tags": ["gentrification_effect", "urbanism_overview"]
+  },
+  {
+    "title": "Street-level bureaucrats coping with conflicts in area-based initiatives",
+    "abstract": "The paper studies participatory planning processes and street-level bureaucrats in area-based initiatives, mentioning regeneration only broadly.",
+    "expected_label": 0,
+    "tags": ["governance_policy", "background_only"]
+  },
+  {
+    "title": "Culture-led place-making and brand building between Ljubljana and Porto",
+    "abstract": "The article compares place-making and branding strategies in two cities and discusses adaptive reuse only at a broad placemaking level.",
+    "expected_label": 0,
+    "tags": ["urbanism_overview", "background_only"]
+  },
+  {
+    "title": "Men at the margin: Masculinity and space in downtown Vancouver, 1950-1986",
+    "abstract": "The paper studies masculinity and social construction of urban space and says those narratives once provided a rationale for urban renewal.",
+    "expected_label": 0,
+    "tags": ["social_history", "background_only"]
+  },
+  {
+    "title": "Engineering community spirit in Dutch local governance",
+    "abstract": "This article analyzes community participation and affective citizenship in a deprived neighborhood without a concrete renewal anchor.",
+    "expected_label": 0,
+    "tags": ["governance_policy", "background_only"]
+  },
+  {
+    "title": "Housing God, Losing Ground in urban China",
+    "abstract": "The paper examines church responses to demolition and development politics but does not analyze renewal as the study object.",
+    "expected_label": 0,
+    "tags": ["social_history", "background_only"]
+  },
+  {
+    "title": "Visual and aesthetic markers of gentrification in tourist destinations",
+    "abstract": "The study maps aesthetic markers of tourism-led gentrification without analyzing a specific regeneration intervention chain.",
+    "expected_label": 1,
+    "tags": ["gentrification_effect", "background_only"]
+  },
+  {
+    "title": "Delivering shared-space schemes: two case studies from Bournemouth",
+    "abstract": "The paper describes design and consultation for shared-space schemes but does not situate them inside a renewal project or renewal policy.",
+    "expected_label": 0,
+    "tags": ["public_realm", "background_only"]
+  },
+  {
+    "title": "Monthly monitoring of urban development and renewal at block level using Sentinel-2 time series",
+    "abstract": "The contribution is a block-level remote sensing method for urban development monitoring; renewal is broad framing rather than the concrete object.",
+    "expected_label": 0,
+    "tags": ["remote_sensing_method", "background_only"]
+  },
+  {
+    "title": "A cloud-edge architecture to support post-earthquake reconstruction",
+    "abstract": "The paper proposes a technical architecture for post-earthquake reconstruction and does not study any urban renewal intervention chain.",
+    "expected_label": 0,
+    "tags": ["optimization_method", "background_only"]
+  },
+  {
+    "title": "Residents' attitudes toward future tourism development and community attachment",
+    "abstract": "The article studies tourism development, well-being, and attachment, with no concrete regeneration or renewal anchor.",
+    "expected_label": 0,
+    "tags": ["general_sustainability", "background_only"]
+  },
+  {
+    "title": "Unpacking the 15-Minute City via 6G, IoT, and Digital Twins",
+    "abstract": "This paper develops a digital vision for efficiency and resilience in cities and does not analyze a renewal project or renewal policy.",
+    "expected_label": 0,
+    "tags": ["general_sustainability", "optimization_method"]
+  },
+  {
+    "title": "Creative cities: The role of culture",
+    "abstract": "The article discusses culture-led urban development and occasionally references regeneration, but not a concrete renewal intervention.",
+    "expected_label": 0,
+    "tags": ["urbanism_overview", "background_only"]
+  },
+  {
+    "title": "The global cultural city? Politics in multicultural marketplaces of South-east Asia",
+    "abstract": "The paper analyzes spatial imagineering and multicultural marketplaces, with urban renewal serving only as background context.",
+    "expected_label": 0,
+    "tags": ["urbanism_overview", "social_history"]
+  },
+  {
+    "title": "Poverty and disrepair in private sector housing",
+    "abstract": "This article challenges myths about poor housing conditions but does not examine a renewal intervention or regeneration policy.",
+    "expected_label": 0,
+    "tags": ["social_history", "background_only"]
+  },
+  {
+    "title": "THE SEARCH FOR A CENTER - THE RECOMPOSITION OF RACE, CLASS AND SPACE IN LOS-ANGELES",
+    "abstract": "The paper examines planning histories and postwar spatial restructuring in Los Angeles, including struggles against urban renewal as a central historical process.",
+    "expected_label": 1,
+    "tags": ["social_history", "governance_policy"]
+  },
+  {
+    "title": "From squatters to creatives. An innovation perspective on temporary use in planning",
+    "abstract": "This article reconstructs how temporary use of vacant inner-city spaces became a strategically embedded planning procedure in Germany.",
+    "expected_label": 1,
+    "tags": ["adaptive_reuse", "governance_policy"]
+  },
+  {
+    "title": "Controlling Images of Neighborhoods in Gentrification Coverage",
+    "abstract": "The paper analyzes media representations of neighborhoods under gentrification and redevelopment as the main urban change process.",
+    "expected_label": 1,
+    "tags": ["gentrification_effect", "social_history"]
+  },
+  {
+    "title": "Citizen participation, agency and voice",
+    "abstract": "The article studies participation in local public action, including urban renewal, and treats renewal participation as a substantive governance field rather than background context.",
+    "expected_label": 1,
+    "tags": ["governance_policy", "social_history"]
+  },
+  {
+    "title": "Structural changes in a Danish social housing area: The impact of forced permanent rehousing on contact frequency with general practitioner and use of antidepressants",
+    "abstract": "This study measures health consequences of rehousing in a social housing area and does not analyze an urban renewal program as the main research object.",
+    "expected_label": 0,
+    "tags": ["background_only", "social_history"]
+  },
+  {
+    "title": "People living in ageing buildings: Their quality of life and sense of belonging",
+    "abstract": "The paper evaluates quality of life and place belonging among residents of ageing buildings, even though the districts were designated for demolition under a renewal programme.",
+    "expected_label": 0,
+    "tags": ["background_only", "social_history"]
+  },
+  {
+    "title": "Urban renewal moves in dimer models",
+    "abstract": "This paper studies bipartite graph tiling, combinatorics, and cluster algebra under the urban renewal move.",
+    "expected_label": 0,
+    "tags": ["math_term_misuse", "background_only"]
+  },
+  {
+    "title": "Governing property-led rural regeneration in Ireland",
+    "abstract": "The article examines a rural renewal scheme and its implications for rural development in declining regions.",
+    "expected_label": 0,
+    "tags": ["rural_nonurban", "background_only"]
+  },
+  {
+    "title": "Deep learning architecture for UAV multispectral pollution monitoring",
+    "abstract": "The framework combines remote sensing imagery, sensors, and optimization for pollution mapping and environmental monitoring.",
+    "expected_label": 0,
+    "tags": ["optimization_method", "remote_sensing_method"]
+  },
+  {
+    "title": "Remote sensing framework for adaptive reuse in a historic district",
+    "abstract": "This UAV multispectral study supports adaptive reuse and compensation planning in a historic district.",
+    "expected_label": 1,
+    "tags": ["adaptive_reuse", "remote_sensing_method"]
+  }
+]
