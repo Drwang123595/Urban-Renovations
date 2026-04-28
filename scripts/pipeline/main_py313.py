@@ -515,6 +515,11 @@ def build_run_context(
     order_id: str,
     order_seed: int | None,
     max_samples_per_window: int,
+    dynamic_topics_enabled: bool,
+    dynamic_topics_include_full_corpus: bool,
+    dynamic_binary_refinement_enabled: bool,
+    dynamic_binary_refinement_unknown_only: bool,
+    dynamic_binary_refinement_allow_flip: bool,
 ) -> dict:
     return {
         "experiment_track": experiment_track,
@@ -527,6 +532,11 @@ def build_run_context(
         "order_id": order_id,
         "order_seed": order_seed,
         "max_samples_per_window": int(max_samples_per_window),
+        "dynamic_topics_enabled": bool(dynamic_topics_enabled),
+        "dynamic_topics_include_full_corpus": bool(dynamic_topics_include_full_corpus),
+        "dynamic_binary_refinement_enabled": bool(dynamic_binary_refinement_enabled),
+        "dynamic_binary_refinement_unknown_only": bool(dynamic_binary_refinement_unknown_only),
+        "dynamic_binary_refinement_allow_flip": bool(dynamic_binary_refinement_allow_flip),
     }
 
 
@@ -894,6 +904,33 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Enable or disable LLM assist for three_stage_hybrid (default: on, can also be set by env)",
     )
     parser.add_argument(
+        "--dynamic-topics",
+        choices=["on", "off"],
+        default=None,
+        help="Enable offline dynamic topic discovery post-processing (default: off)",
+    )
+    parser.add_argument(
+        "--dynamic-topics-full-corpus",
+        action="store_true",
+        help="When enabling dynamic topics, cluster the full corpus as background evidence",
+    )
+    parser.add_argument(
+        "--dynamic-binary-refine",
+        choices=["on", "off"],
+        default=None,
+        help="Enable dynamic-topic-driven binary refinement (default: off; implies --dynamic-topics on)",
+    )
+    parser.add_argument(
+        "--dynamic-binary-unknown-only",
+        action="store_true",
+        help="Only refine rows whose binary label is unknown/empty",
+    )
+    parser.add_argument(
+        "--dynamic-binary-allow-flip",
+        action="store_true",
+        help="Allow refining already-0/1 labels when near-threshold or review-triggered",
+    )
+    parser.add_argument(
         "--allow-candidate",
         action="store_true",
         help="Allow candidate prompt strategies for experiment runs",
@@ -1063,6 +1100,26 @@ def build_execution_context(args, input_path: Path):
         urban_method=args.urban_method,
         hybrid_llm_assist_enabled=args.hybrid_llm_assist,
     )
+
+    def _resolve_toggle(raw: object, default: bool = False) -> bool:
+        if raw in ("", None):
+            return bool(default)
+        if isinstance(raw, bool):
+            return bool(raw)
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+    dynamic_topics_enabled = _resolve_toggle(args.dynamic_topics, default=False)
+    dynamic_binary_refinement_enabled = _resolve_toggle(args.dynamic_binary_refine, default=False)
+    if dynamic_binary_refinement_enabled:
+        dynamic_topics_enabled = True
+
+    dynamic_binary_allow_flip = bool(args.dynamic_binary_allow_flip)
+    dynamic_binary_unknown_only = True
+    if dynamic_binary_allow_flip:
+        dynamic_binary_unknown_only = False
+    if bool(args.dynamic_binary_unknown_only):
+        dynamic_binary_unknown_only = True
+
     run_context = build_run_context(
         experiment_track=args.experiment_track,
         dataset_id=dataset_id,
@@ -1074,6 +1131,11 @@ def build_execution_context(args, input_path: Path):
         order_id=args.order_id,
         order_seed=args.order_seed,
         max_samples_per_window=args.max_samples_per_window,
+        dynamic_topics_enabled=dynamic_topics_enabled,
+        dynamic_topics_include_full_corpus=bool(args.dynamic_topics_full_corpus),
+        dynamic_binary_refinement_enabled=dynamic_binary_refinement_enabled,
+        dynamic_binary_refinement_unknown_only=bool(dynamic_binary_unknown_only),
+        dynamic_binary_refinement_allow_flip=bool(dynamic_binary_allow_flip),
     )
     return dataset_id, truth_file, session_policy, run_context
 
