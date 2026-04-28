@@ -23,6 +23,7 @@ from ..urban.urban_topic_classifier import UrbanTopicClassifier
 from ..urban.urban_topic_taxonomy import legacy_topic_for_label, urban_flag_for_topic_label
 from ..urban.dynamic_topic_discovery import DYNAMIC_BINARY_DEFAULTS, DYNAMIC_TOPIC_DEFAULTS
 from ..urban.dynamic_binary_refinement import DynamicBinaryRefinementConfig, DynamicBinaryRefiner
+from ..urban.urban_binary_policy_v2 import BINARY_POLICY_V2_DEFAULTS, UrbanBinaryPolicyV2
 
 
 class TaskType(Enum):
@@ -54,6 +55,7 @@ URBAN_EXPLAINABILITY_CONTRACT_DEFAULTS = {
 
 URBAN_DYNAMIC_TOPIC_CONTRACT_DEFAULTS = dict(DYNAMIC_TOPIC_DEFAULTS)
 URBAN_DYNAMIC_BINARY_CONTRACT_DEFAULTS = dict(DYNAMIC_BINARY_DEFAULTS)
+URBAN_BINARY_POLICY_V2_CONTRACT_DEFAULTS = dict(BINARY_POLICY_V2_DEFAULTS)
 
 
 class TaskRouter:
@@ -319,8 +321,6 @@ class TaskRouter:
         context = run_context or {}
         dynamic_topics_enabled = bool(context.get("dynamic_topics_enabled", False))
         dynamic_binary_refinement_enabled = bool(context.get("dynamic_binary_refinement_enabled", False))
-        if not dynamic_topics_enabled and not dynamic_binary_refinement_enabled:
-            return frame
 
         enriched = frame
         if dynamic_topics_enabled or dynamic_binary_refinement_enabled:
@@ -343,16 +343,33 @@ class TaskRouter:
             except Exception as exc:
                 print(f"[WARN] Dynamic topic enrichment failed, continuing without it: {type(exc).__name__}: {exc}")
 
-        if not dynamic_binary_refinement_enabled:
+        if dynamic_binary_refinement_enabled:
+            try:
+                refiner = DynamicBinaryRefiner(DynamicBinaryRefinementConfig.from_context(context))
+                enriched = refiner.refine(enriched, mutate_final_fields=True)
+            except Exception as exc:
+                print(
+                    f"[WARN] Dynamic binary refinement failed, continuing without it: {type(exc).__name__}: {exc}"
+                )
+
+        policy_enabled = bool(context.get("urban_binary_policy_v2_enabled", True))
+        if not policy_enabled:
             return enriched
 
         try:
-            refiner = DynamicBinaryRefiner(DynamicBinaryRefinementConfig.from_context(context))
-            return refiner.refine(enriched, mutate_final_fields=True)
-        except Exception as exc:
-            print(
-                f"[WARN] Dynamic binary refinement failed, continuing without it: {type(exc).__name__}: {exc}"
+            experiment_track = str(context.get("experiment_track") or "").strip()
+            llm_adjudication_enabled = (
+                experiment_track == "research_matrix"
+                and bool(context.get("hybrid_llm_assist_enabled", self.hybrid_llm_assist_enabled))
+                and self.urban_method == UrbanMethod.THREE_STAGE_HYBRID
             )
+            policy = UrbanBinaryPolicyV2(
+                llm_client=self.urban_client,
+                llm_enabled=llm_adjudication_enabled,
+            )
+            return policy.apply(enriched)
+        except Exception as exc:
+            print(f"[WARN] Urban binary policy V2 failed, continuing without it: {type(exc).__name__}: {exc}")
             return enriched
 
     def _run_urban_method(
@@ -863,6 +880,13 @@ class TaskRouter:
             "dynamic_binary_candidate_action",
             "dynamic_binary_candidate_reason",
             "dynamic_binary_review_priority",
+            "binary_policy_action",
+            "binary_policy_reason",
+            "binary_policy_conflict_type",
+            "llm_adjudication_required",
+            "llm_adjudication_label",
+            "llm_adjudication_confidence",
+            "llm_adjudication_reason",
             "decision_source",
             "decision_reason",
         ]:
@@ -873,6 +897,8 @@ class TaskRouter:
         for column, default_value in URBAN_DYNAMIC_TOPIC_CONTRACT_DEFAULTS.items():
             output.setdefault(column, default_value)
         for column, default_value in URBAN_DYNAMIC_BINARY_CONTRACT_DEFAULTS.items():
+            output.setdefault(column, default_value)
+        for column, default_value in URBAN_BINARY_POLICY_V2_CONTRACT_DEFAULTS.items():
             output.setdefault(column, default_value)
         if "final_label" in output and output.get("final_label") in (None, ""):
             output["final_label"] = urban_label

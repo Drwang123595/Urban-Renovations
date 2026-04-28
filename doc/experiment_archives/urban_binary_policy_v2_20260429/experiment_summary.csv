@@ -1,0 +1,8 @@
+run_id,phase,description,dataset,llm_mode,notes,rows,positive_count,negative_count,positive_rate,llm_used_sum,llm_attempted_sum,accuracy,precision,recall,f1,tp,tn,fp,fn
+1000_labeled_no_llm_initial_policy_v2,diagnostic_baseline,V2 初版 no-LLM 有标签回归,1000 labeled,off,达到无 LLM 准确率目标但召回仍需观察,1000,759,241,0.759,0,0,0.8490000000000001,0.935441,0.874384,0.903883,710.0,139.0,49.0,102.0
+1000_labeled_llm_initial_policy_v2,diagnostic_baseline,V2 初版 LLM 困难样本裁决,1000 labeled,on_conflict_only,LLM 仅处理冲突样本并提升准确率,1000,820,180,0.82,134,255,0.888,0.926829,0.935961,0.931373,760.0,128.0,60.0,52.0
+10000_no_llm_initial_policy_v2,failed_gate_diagnostic,V2 初版 10000 篇比例诊断,10000 sampled unlabeled,off,正例率 34.07% 说明 hard negative 和 conflict_review 过度压制,10000,3407,6593,0.3407,0,0,,,,,,,,
+1000_labeled_no_llm_stable_policy_v2,stable_candidate,V2 recall 修复后 no-LLM 有标签回归,1000 labeled,off,达到 no-LLM 准确率目标,1000,967,33,0.967,0,0,0.841,0.837642,0.997537,0.910624,810.0,31.0,157.0,2.0
+1000_labeled_llm_stable_policy_v2,stable_candidate,V2 recall 修复后 LLM 困难样本裁决,1000 labeled,on_conflict_only,达到 LLM 准确率目标,1000,894,106,0.894,141,277,0.904,0.900447,0.991379,0.943728,805.0,99.0,89.0,7.0
+10000_no_llm_stable_policy_v2_seed20260428,stable_candidate,V2 recall 修复后第一轮 10000 no-LLM 抽样,10000 sampled unlabeled,off,正例率符合 no-LLM 大样本目标,10000,7665,2335,0.7665,0,0,,,,,,,,
+10000_no_llm_resample_full_on_seed2026042802,stable_candidate_resample,排除上一轮样本后的 10000 no-LLM 重新抽样,10000 resampled unlabeled,off,重新抽样后仍符合 no-LLM 大样本目标,10000,7586,2414,0.7586,0,0,,,,,,,,

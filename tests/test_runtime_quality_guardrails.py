@@ -393,6 +393,8 @@ def test_evaluate_one_file_writes_guardrail_sheets(tmp_path):
         "Chunk Metrics",
         "Guardrails",
         "Urban Error Analysis",
+        "Binary Policy Analysis",
+        "LLM Adjudication Analysis",
     ]
 
 

@@ -78,6 +78,34 @@ URBAN_ERROR_OUTPUT_COLUMNS = [
     "Urban Parse Reason",
 ]
 
+BINARY_POLICY_ANALYSIS_COLUMNS = [
+    "File",
+    "binary_policy_action",
+    "binary_policy_conflict_type",
+    "Total",
+    "Accuracy",
+    "TP",
+    "TN",
+    "FP",
+    "FN",
+    "Predicted Positive Rate",
+]
+
+LLM_ADJUDICATION_ANALYSIS_COLUMNS = [
+    "File",
+    "llm_adjudication_required",
+    "llm_adjudication_label",
+    "llm_used",
+    "llm_attempted",
+    "Total",
+    "Accuracy",
+    "TP",
+    "TN",
+    "FP",
+    "FN",
+    "Predicted Positive Rate",
+]
+
 URBAN_EXPLICIT_RENEWAL_PATTERNS = {
     "urban_renewal": r"\burban renewal\b",
     "urban_regeneration": r"\burban regeneration\b|\bregeneration\b",
@@ -430,6 +458,14 @@ def evaluate_one_file(
         pred_df=df_pred,
         source_name=pred_file.stem,
     )
+    binary_policy_analysis_df = summarize_binary_policy_analysis(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
+    llm_adjudication_analysis_df = summarize_llm_adjudication_analysis(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
     report_path = report_dir / f"Eval_{pred_file.name}"
     with pd.ExcelWriter(report_path, engine="openpyxl") as writer:
         detail_df.to_excel(writer, sheet_name="Detail Comparison", index=False)
@@ -453,6 +489,8 @@ def evaluate_one_file(
         chunk_metrics_df.to_excel(writer, sheet_name="Chunk Metrics", index=False)
         guardrail_df.to_excel(writer, sheet_name="Guardrails", index=False)
         urban_error_df.to_excel(writer, sheet_name="Urban Error Analysis", index=False)
+        binary_policy_analysis_df.to_excel(writer, sheet_name="Binary Policy Analysis", index=False)
+        llm_adjudication_analysis_df.to_excel(writer, sheet_name="LLM Adjudication Analysis", index=False)
     return (
         alignment.merged,
         metrics_df,
@@ -475,6 +513,8 @@ def evaluate_one_file(
         dynamic_topic_candidates_df,
         dynamic_binary_recommendations_df,
         bootstrap_ci_df,
+        binary_policy_analysis_df,
+        llm_adjudication_analysis_df,
         report_path,
     )
 
@@ -630,6 +670,121 @@ def build_urban_error_analysis(
         )
 
     return pd.DataFrame(rows).reindex(columns=URBAN_ERROR_OUTPUT_COLUMNS)
+
+
+def _resolve_analysis_col(frame: pd.DataFrame, candidates: list[str]) -> str | None:
+    for candidate in candidates:
+        for column in (f"{candidate}_pred", candidate):
+            if column in frame.columns:
+                return column
+    return None
+
+
+def _binary_counts_for_group(group: pd.DataFrame, truth_col: str | None, pred_col: str | None) -> dict:
+    total = int(len(group))
+    if not truth_col or not pred_col or total == 0:
+        return {
+            "Total": total,
+            "Accuracy": pd.NA,
+            "TP": pd.NA,
+            "TN": pd.NA,
+            "FP": pd.NA,
+            "FN": pd.NA,
+            "Predicted Positive Rate": pd.NA,
+        }
+    truth = group[truth_col].apply(normalize_binary_value)
+    pred = group[pred_col].apply(normalize_binary_value)
+    valid = truth.isin([0, 1]) & pred.isin([0, 1])
+    truth = truth[valid]
+    pred = pred[valid]
+    total_valid = int(valid.sum())
+    if total_valid == 0:
+        return {
+            "Total": total,
+            "Accuracy": pd.NA,
+            "TP": 0,
+            "TN": 0,
+            "FP": 0,
+            "FN": 0,
+            "Predicted Positive Rate": pd.NA,
+        }
+    tp = int(((truth == 1) & (pred == 1)).sum())
+    tn = int(((truth == 0) & (pred == 0)).sum())
+    fp = int(((truth == 0) & (pred == 1)).sum())
+    fn = int(((truth == 1) & (pred == 0)).sum())
+    return {
+        "Total": total,
+        "Accuracy": (tp + tn) / total_valid,
+        "TP": tp,
+        "TN": tn,
+        "FP": fp,
+        "FN": fn,
+        "Predicted Positive Rate": float((pred == 1).mean()),
+    }
+
+
+def summarize_binary_policy_analysis(merged_df: pd.DataFrame, *, source_name: str) -> pd.DataFrame:
+    action_col = _resolve_analysis_col(merged_df, ["binary_policy_action"])
+    conflict_col = _resolve_analysis_col(merged_df, ["binary_policy_conflict_type"])
+    truth_col = _resolve_analysis_col(merged_df, [Schema.IS_URBAN_RENEWAL])
+    pred_col = _resolve_analysis_col(merged_df, ["final_label", "urban_flag", Schema.IS_URBAN_RENEWAL])
+    if action_col is None:
+        return pd.DataFrame(columns=BINARY_POLICY_ANALYSIS_COLUMNS)
+
+    working = merged_df.copy()
+    working["_policy_action"] = working[action_col].fillna("").astype(str).replace({"": "missing"})
+    if conflict_col:
+        working["_policy_conflict"] = working[conflict_col].fillna("").astype(str).replace({"": "none"})
+    else:
+        working["_policy_conflict"] = "none"
+
+    rows = []
+    for (action, conflict), group in working.groupby(["_policy_action", "_policy_conflict"], dropna=False):
+        row = {
+            "File": source_name,
+            "binary_policy_action": action,
+            "binary_policy_conflict_type": conflict,
+        }
+        row.update(_binary_counts_for_group(group, truth_col, pred_col))
+        rows.append(row)
+    return pd.DataFrame(rows).reindex(columns=BINARY_POLICY_ANALYSIS_COLUMNS)
+
+
+def summarize_llm_adjudication_analysis(merged_df: pd.DataFrame, *, source_name: str) -> pd.DataFrame:
+    required_col = _resolve_analysis_col(merged_df, ["llm_adjudication_required"])
+    label_col = _resolve_analysis_col(merged_df, ["llm_adjudication_label"])
+    used_col = _resolve_analysis_col(merged_df, ["llm_used"])
+    attempted_col = _resolve_analysis_col(merged_df, ["llm_attempted"])
+    truth_col = _resolve_analysis_col(merged_df, [Schema.IS_URBAN_RENEWAL])
+    pred_col = _resolve_analysis_col(merged_df, ["final_label", "urban_flag", Schema.IS_URBAN_RENEWAL])
+    if required_col is None:
+        return pd.DataFrame(columns=LLM_ADJUDICATION_ANALYSIS_COLUMNS)
+
+    working = merged_df.copy()
+    working["_required"] = pd.to_numeric(working[required_col], errors="coerce").fillna(0).astype(int)
+    working["_label"] = working[label_col].fillna("").astype(str).replace({"": "none"}) if label_col else "none"
+    working["_used"] = pd.to_numeric(working[used_col], errors="coerce").fillna(0).astype(int) if used_col else 0
+    working["_attempted"] = (
+        pd.to_numeric(working[attempted_col], errors="coerce").fillna(0).astype(int)
+        if attempted_col
+        else 0
+    )
+
+    rows = []
+    for (required, label, used, attempted), group in working.groupby(
+        ["_required", "_label", "_used", "_attempted"],
+        dropna=False,
+    ):
+        row = {
+            "File": source_name,
+            "llm_adjudication_required": required,
+            "llm_adjudication_label": label,
+            "llm_used": used,
+            "llm_attempted": attempted,
+        }
+        row.update(_binary_counts_for_group(group, truth_col, pred_col))
+        rows.append(row)
+    return pd.DataFrame(rows).reindex(columns=LLM_ADJUDICATION_ANALYSIS_COLUMNS)
 
 
 def build_protocol_df(
@@ -914,6 +1069,8 @@ def _new_frame_collections() -> dict[str, list[pd.DataFrame]]:
         "dynamic_topic_candidates": [],
         "dynamic_binary_recommendations": [],
         "bootstrap_ci": [],
+        "binary_policy_analysis": [],
+        "llm_adjudication_analysis": [],
     }
 
 
@@ -940,6 +1097,8 @@ def _append_evaluated_frames(frames: dict[str, list[pd.DataFrame]], evaluated) -
         dynamic_topic_candidates_df,
         dynamic_binary_recommendations_df,
         bootstrap_ci_df,
+        binary_policy_analysis_df,
+        llm_adjudication_analysis_df,
         report_path,
     ) = evaluated
     frames["metrics"].append(metrics_df)
@@ -962,6 +1121,8 @@ def _append_evaluated_frames(frames: dict[str, list[pd.DataFrame]], evaluated) -
     frames["dynamic_topic_candidates"].append(dynamic_topic_candidates_df)
     frames["dynamic_binary_recommendations"].append(dynamic_binary_recommendations_df)
     frames["bootstrap_ci"].append(bootstrap_ci_df)
+    frames["binary_policy_analysis"].append(binary_policy_analysis_df)
+    frames["llm_adjudication_analysis"].append(llm_adjudication_analysis_df)
     return aligned_merged_df, guardrail_df, report_path
 
 
@@ -1165,6 +1326,8 @@ def _write_summary_workbook(args, pred_files, truth_files, report_dir: Path, sta
     merged_dynamic_topic_candidates = _concat_frames(frames["dynamic_topic_candidates"])
     merged_dynamic_binary_recommendations = _concat_frames(frames["dynamic_binary_recommendations"])
     merged_bootstrap_ci = _concat_frames(frames["bootstrap_ci"])
+    merged_binary_policy_analysis = _concat_frames(frames["binary_policy_analysis"])
+    merged_llm_adjudication_analysis = _concat_frames(frames["llm_adjudication_analysis"])
     run_metadata_df = pd.DataFrame(state["run_metadata_rows"])
 
     all_comparable = comparability_df.empty or comparability_df["comparable_with_first"].all()
@@ -1217,6 +1380,8 @@ def _write_summary_workbook(args, pred_files, truth_files, report_dir: Path, sta
             merged_dynamic_fixed_crosswalk.to_excel(writer, sheet_name="Dynamic Fixed Crosswalk", index=False)
             merged_dynamic_topic_candidates.to_excel(writer, sheet_name="Dynamic Topic Candidates", index=False)
             merged_dynamic_binary_recommendations.to_excel(writer, sheet_name="Dynamic Binary Recommendations", index=False)
+            merged_binary_policy_analysis.to_excel(writer, sheet_name="Binary Policy Analysis", index=False)
+            merged_llm_adjudication_analysis.to_excel(writer, sheet_name="LLM Adjudication Analysis", index=False)
             merged_bootstrap_ci.to_excel(writer, sheet_name="Bootstrap CI", index=False)
             mcnemar_df.to_excel(writer, sheet_name="McNemar", index=False)
             merged_chunk_metrics.to_excel(writer, sheet_name="Chunk Metrics", index=False)
