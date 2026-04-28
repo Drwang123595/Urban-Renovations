@@ -213,6 +213,23 @@ class TaskRouter:
             ).reset_index(drop=True)
         return prepared.reset_index(drop=True)
 
+    def _urban_checkpoint_interval(
+        self,
+        row_count: int,
+        run_context: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        raw_value = self._run_context_value(run_context, "urban_checkpoint_interval")
+        if raw_value not in (None, ""):
+            try:
+                return max(1, int(raw_value))
+            except (TypeError, ValueError):
+                pass
+        if row_count >= 5000:
+            return 1000
+        if row_count >= 1000:
+            return 100
+        return 10
+
     def run_urban_renewal(
         self,
         input_file: str = None,
@@ -245,6 +262,7 @@ class TaskRouter:
             df = df.head(limit)
 
         results_list = []
+        checkpoint_interval = self._urban_checkpoint_interval(len(df), run_context=run_context)
 
         for index, row in tqdm(df.iterrows(), total=len(df)):
             title = str(row.get(Schema.TITLE, "") or "")
@@ -280,7 +298,7 @@ class TaskRouter:
                 )
             )
 
-            if (index + 1) % 10 == 0 or (index + 1) == len(df):
+            if (index + 1) % checkpoint_interval == 0 or (index + 1) == len(df):
                 temp_df = pd.DataFrame(results_list)
                 temp_df.to_excel(output_path, index=False, engine="openpyxl")
 
