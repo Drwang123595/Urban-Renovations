@@ -22,6 +22,7 @@ from ..urban.urban_metadata import UrbanMetadataRecord
 from ..urban.urban_topic_classifier import UrbanTopicClassifier
 from ..urban.urban_topic_taxonomy import legacy_topic_for_label, urban_flag_for_topic_label
 from ..urban.dynamic_topic_discovery import DYNAMIC_BINARY_DEFAULTS, DYNAMIC_TOPIC_DEFAULTS
+from ..urban.dynamic_binary_refinement import DynamicBinaryRefinementConfig, DynamicBinaryRefiner
 
 
 class TaskType(Enum):
@@ -283,8 +284,58 @@ class TaskRouter:
                 temp_df = pd.DataFrame(results_list)
                 temp_df.to_excel(output_path, index=False, engine="openpyxl")
 
+        if results_list:
+            final_df = pd.DataFrame(results_list)
+            final_df = self._postprocess_urban_prediction_frame(final_df, run_context=run_context)
+            final_df.to_excel(output_path, index=False, engine="openpyxl")
+
         print(f"[INFO] Urban Renewal results saved to: {output_path}")
         return output_path
+
+    def _postprocess_urban_prediction_frame(
+        self,
+        frame: pd.DataFrame,
+        *,
+        run_context: Optional[Dict[str, Any]] = None,
+    ) -> pd.DataFrame:
+        context = run_context or {}
+        dynamic_topics_enabled = bool(context.get("dynamic_topics_enabled", False))
+        dynamic_binary_refinement_enabled = bool(context.get("dynamic_binary_refinement_enabled", False))
+        if not dynamic_topics_enabled and not dynamic_binary_refinement_enabled:
+            return frame
+
+        enriched = frame
+        if dynamic_topics_enabled or dynamic_binary_refinement_enabled:
+            try:
+                from ..urban.dynamic_topic_discovery import DynamicTopicConfig, DynamicTopicDiscovery
+
+                prefer_sklearn = not bool(context.get("dynamic_topics_keyword_fallback_only", False))
+                config = DynamicTopicConfig(
+                    min_topic_size=int(context.get("dynamic_topics_min_topic_size", 20) or 20),
+                    max_topics=int(context.get("dynamic_topics_max_topics", 60) or 60),
+                    mapping_min_score=float(context.get("dynamic_topics_mapping_min_score", 0.12) or 0.12),
+                    include_full_corpus=bool(context.get("dynamic_topics_include_full_corpus", False)),
+                    prefer_sklearn=prefer_sklearn,
+                )
+                discovery = DynamicTopicDiscovery(config)
+                enriched = discovery.enrich(
+                    enriched,
+                    include_full_corpus=bool(context.get("dynamic_topics_include_full_corpus", False)),
+                )
+            except Exception as exc:
+                print(f"[WARN] Dynamic topic enrichment failed, continuing without it: {type(exc).__name__}: {exc}")
+
+        if not dynamic_binary_refinement_enabled:
+            return enriched
+
+        try:
+            refiner = DynamicBinaryRefiner(DynamicBinaryRefinementConfig.from_context(context))
+            return refiner.refine(enriched, mutate_final_fields=True)
+        except Exception as exc:
+            print(
+                f"[WARN] Dynamic binary refinement failed, continuing without it: {type(exc).__name__}: {exc}"
+            )
+            return enriched
 
     def _run_urban_method(
         self,

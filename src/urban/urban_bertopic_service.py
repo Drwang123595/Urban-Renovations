@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -253,7 +254,7 @@ class UrbanBERTopicService:
         classifier_predictions = [classifier.predict(record) for record in records]
         documents = [self._build_topic_document(record) for record in records]
 
-        embedding_model = SentenceTransformer(self.embedding_model_name)
+        embedding_model = self._load_embedding_model(SentenceTransformer)
         vectorizer_model = CountVectorizer(
             stop_words="english",
             ngram_range=(1, 3),
@@ -759,8 +760,37 @@ class UrbanBERTopicService:
     def _load_model(self, model_path: Path):
         model_path = self._ensure_path_within_artifact_dir(model_path)
         BERTopic, SentenceTransformer, _ = self._import_stack()
-        embedding_model = SentenceTransformer(self.embedding_model_name)
+        embedding_model = self._load_embedding_model(SentenceTransformer)
         return BERTopic.load(str(model_path), embedding_model=embedding_model)
+
+    def _load_embedding_model(self, SentenceTransformer):
+        cache_folder: str | None = None
+        cache_candidate = getattr(Config, "MODELS_DIR", None)
+        if cache_candidate is not None:
+            candidate = Path(cache_candidate) / "hf_cache"
+            if candidate.exists():
+                cache_folder = str(candidate.resolve())
+
+        local_only_raw = os.environ.get("HF_LOCAL_FILES_ONLY")
+        if local_only_raw is None:
+            local_only_raw = os.environ.get("HF_HUB_OFFLINE")
+        if local_only_raw is None:
+            local_files_only = bool(cache_folder)
+        else:
+            local_files_only = str(local_only_raw).strip().lower() in {"1", "true", "yes", "on"}
+
+        kwargs: dict[str, Any] = {}
+        if cache_folder:
+            kwargs["cache_folder"] = cache_folder
+        if local_files_only:
+            kwargs["local_files_only"] = True
+
+        try:
+            return SentenceTransformer(self.embedding_model_name, **kwargs)
+        except TypeError:
+            # Backward-compatible fallback for older sentence-transformers releases.
+            kwargs.pop("local_files_only", None)
+            return SentenceTransformer(self.embedding_model_name, **kwargs)
 
     def _resolve_artifact_dir(self) -> Path:
         artifact_dir = Path(self.artifact_dir).expanduser().resolve(strict=False)
