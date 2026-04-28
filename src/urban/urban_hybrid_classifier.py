@@ -3268,7 +3268,12 @@ class UrbanHybridClassifier:
             binary_label=audit_binary_label,
             decision_reason=decision_reason,
         )
-        urban_flag = urban_flag_for_topic_label(final_topic)
+        topic_binary_label = urban_flag_for_topic_label(final_topic)
+        urban_flag = (
+            audit_binary_label
+            if audit_binary_label in {"0", "1"}
+            else topic_binary_label
+        )
         review_flag, review_reason = self._reconcile_final_review_signal(
             base,
             final_topic=final_topic,
@@ -3332,7 +3337,7 @@ class UrbanHybridClassifier:
                 "bertopic_hint_conflict_flag": bertopic_conflict_flag,
                 "binary_topic_consistency_flag": self._effective_binary_topic_consistency_flag(
                     base,
-                    binary_label=audit_binary_label,
+                    binary_label=urban_flag,
                     final_topic=final_topic,
                 ),
                 "taxonomy_coverage_status": taxonomy_status,

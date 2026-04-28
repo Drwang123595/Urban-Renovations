@@ -139,3 +139,36 @@ def test_dynamic_binary_refiner_does_not_flip_positive_to_negative_by_default():
     assert str(refined.loc[0, "dynamic_binary_override_applied"]).strip() in {"", "0"}
     assert str(refined.loc[0, "final_label"]).strip() == "1"
     assert str(refined.loc[0, "topic_final"]).strip() == "U7"
+
+
+def test_dynamic_binary_refiner_does_not_flip_unknown_positive_to_negative():
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "Urban governance and neighborhood displacement",
+                Schema.ABSTRACT: "This paper studies city policy and displacement in urban communities.",
+                Schema.IS_URBAN_RENEWAL: "1",
+                "final_label": "1",
+                "urban_flag": "1",
+                "topic_final": "Unknown",
+                "topic_final_group": "unknown",
+                "taxonomy_coverage_status": "unknown",
+                "review_flag_raw": 1,
+                "urban_probability_score": 0.70,
+                "binary_decision_threshold": 0.45,
+                "dynamic_topic_id": "DUR_9001",
+                "dynamic_topic_size": 120,
+                "dynamic_topic_confidence": 0.90,
+                "dynamic_mapping_status": "mapped_to_fixed",
+                "dynamic_to_fixed_topic_candidate": "N1",
+                "dynamic_binary_candidate_label": "0",
+                "dynamic_binary_candidate_action": "possible_false_positive_cluster",
+            }
+        ]
+    )
+
+    refined = DynamicBinaryRefiner(DynamicBinaryRefinementConfig()).refine(frame, mutate_final_fields=True)
+
+    assert str(refined.loc[0, "dynamic_binary_override_applied"]).strip() in {"", "0"}
+    assert str(refined.loc[0, "final_label"]).strip() == "1"
+    assert str(refined.loc[0, "topic_final"]).strip() == "Unknown"

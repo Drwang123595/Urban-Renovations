@@ -261,11 +261,12 @@ class DynamicBinaryRefiner:
         if not bool(target_mask.any()):
             return working
 
-        if cfg.allow_flip_existing:
-            # Default policy: dynamic topics are allowed to *increase* recall (0->1),
-            # but should not silently reduce recall by flipping 1->0.
-            negative_flip = (candidate_norm == "0") & (current_norm == "1") & (~unknown_mask)
-            target_mask = target_mask & (~negative_flip)
+        # Dynamic topics are allowed to increase recall (0->1) or resolve
+        # unlabeled rows, but they must not reduce recall by flipping an
+        # existing binary positive to 0. This applies even when topic_final is
+        # Unknown; the binary decision is the final contract.
+        negative_flip = (candidate_norm == "0") & (current_norm == "1")
+        target_mask = target_mask & (~negative_flip)
 
         if cfg.allow_flip_existing and cfg.require_review_flag_for_flip:
             review_flag = pd.to_numeric(

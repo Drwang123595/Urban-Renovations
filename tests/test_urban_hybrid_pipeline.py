@@ -992,6 +992,17 @@ def _assert_explainability_contract(result):
     assert "review=" in explanation
 
 
+def _assert_final_label_follows_binary_score(result):
+    expected = (
+        "1"
+        if float(result["urban_probability_score"]) >= float(result["binary_decision_threshold"])
+        else "0"
+    )
+    assert result["final_label"] == expected
+    assert result["urban_flag"] == expected
+    assert result[Schema.IS_URBAN_RENEWAL] == expected
+
+
 def test_hybrid_classifier_short_circuits_stage1_hard_negative(monkeypatch):
     monkeypatch.setattr(
         "src.urban_hybrid_classifier.UrbanTopicClassifier",
@@ -1053,7 +1064,7 @@ def test_hybrid_classifier_returns_unknown_for_cross_group_weak_conflict(monkeyp
         "This paper examines governance networks and local institutions in contested districts.",
     )
     assert result["decision_source"] == "unknown_review"
-    assert result["final_label"] == ""
+    assert result["final_label"] in {"0", "1"}
     assert result["urban_flag"] == result["final_label"]
     assert result[Schema.IS_URBAN_RENEWAL] == result["final_label"]
     assert result["topic_final"] == "Unknown"
@@ -1069,6 +1080,48 @@ def test_hybrid_classifier_returns_unknown_for_cross_group_weak_conflict(monkeyp
     assert result["llm_attempted"] == 1
     assert result["llm_used"] == 0
     assert result["llm_family_hint"] == "1"
+
+
+def test_hybrid_final_binary_label_is_not_overwritten_by_unknown_topic():
+    classifier = UrbanHybridClassifier(_NoCallLLMStrategy(), bertopic_service=_NullBERTopicService())
+    base = {
+        "urban_probability_score": 0.72,
+        "binary_decision_threshold": 0.45,
+        "binary_decision_source": "binary_confidence_resolution",
+        "binary_decision_evidence": "score_above_threshold",
+        "taxonomy_coverage_status": "unknown",
+        "topic_rule": "",
+        "topic_local_label": "Unknown",
+        "family_probability_urban": 0.8,
+        "topic_binary_probability": 0.7,
+        "llm_family_hint": "",
+        "stage1_risk_tags": "",
+    }
+
+    result = classifier._build_final_result(
+        base,
+        final_topic="Unknown",
+        decision_source="unknown_review",
+        decision_reason="binary_positive_topic_unknown",
+        confidence=0.72,
+        review_flag=1,
+        review_reason="binary_topic_inconsistency",
+        binary_label="1",
+    )
+
+    assert result["final_label"] == "1"
+    assert result["urban_flag"] == "1"
+    assert result[Schema.IS_URBAN_RENEWAL] == "1"
+    assert result["topic_final"] == "Unknown"
+    assert result["binary_topic_consistency_flag"] == 1
+    assert result["review_flag"] == 1
+    assert result["binary_decision_source"] == "binary_confidence_resolution"
+    assert result["binary_topic_consistency_flag"] == 1
+    assert result["taxonomy_coverage_status"] == "unknown"
+    assert "topic=Unknown/unknown" in result["decision_explanation"]
+    assert "topic_final=Unknown" in result["primary_negative_evidence"]
+    _assert_explainability_contract(result)
+    assert result["binary_audit_resolution_action"] == "positive_binary_conflict_audit"
 
 
 def test_hybrid_classifier_can_disable_llm_for_unknown_review(monkeypatch):
@@ -1087,7 +1140,8 @@ def test_hybrid_classifier_can_disable_llm_for_unknown_review(monkeypatch):
         "This paper examines governance networks and local institutions in contested districts.",
     )
     assert result["decision_source"] == "unknown_review"
-    assert result["final_label"] == ""
+    assert result["final_label"] in {"0", "1"}
+    assert result["urban_flag"] == result["final_label"]
     assert result["binary_decision_source"] == "binary_confidence_resolution"
     assert result["llm_attempted"] == 0
     assert result["llm_family_hint"] == ""
@@ -1151,7 +1205,7 @@ def test_hybrid_classifier_resolves_unknown_when_rule_nonurban_and_llm_family_al
     )
     assert result["decision_source"] == "unknown_hint_resolution"
     assert result["topic_final"] == "N3"
-    assert result["final_label"] == "0"
+    _assert_final_label_follows_binary_score(result)
     assert result["binary_decision_source"] == "binary_confidence_resolution"
     assert float(result["urban_probability_score"]) >= float(result["binary_decision_threshold"])
     assert result["binary_recall_calibration_tier"] == "context_relevance_floor"
@@ -1520,7 +1574,7 @@ def test_uncertain_nonurban_gate_downgrades_n3_rule_local_agree_to_unknown(monke
     )
     assert result["decision_source"] == "uncertain_nonurban_review"
     assert result["topic_final"] == "N3"
-    assert result["final_label"] == "0"
+    _assert_final_label_follows_binary_score(result)
     assert result["uncertain_nonurban_guard_flag"] == 1
     assert result["uncertain_nonurban_guard_action"] == "review"
     assert result["binary_topic_consistency_flag"] == 1
@@ -1627,7 +1681,7 @@ def test_anchor_guard_does_not_trigger_on_urban_transformation_only(monkeypatch)
         "This paper studies governance discourse and policy narratives in cities.",
     )
     assert result["topic_final"] == "N3"
-    assert result["final_label"] == "0"
+    _assert_final_label_follows_binary_score(result)
 
 
 def test_binary_recall_calibration_promotes_urban_context_floor():
@@ -1827,7 +1881,7 @@ def test_hybrid_classifier_preserves_review_rule_signal_for_nonunknown(monkeypat
         "This paper studies policy and governance narratives in urban contexts.",
     )
     assert result["topic_final"] == "N3"
-    assert result["final_label"] == "0"
+    _assert_final_label_follows_binary_score(result)
     assert result["review_flag_raw"] == 1
     assert result["review_flag"] == 1
     assert "rule_unknown" in result["review_reason_raw"]
