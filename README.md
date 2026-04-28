@@ -21,6 +21,11 @@ Current project contract as of 2026-04-27:
   - only used to collect a family hint for `Unknown`
   - does not overwrite `topic_final`
   - `llm_used` must remain `0` in the stable release
+- Stable decision chain is multi-stage (audited via `decision_source`):
+  - `stage1_rule`, `rule_model_fusion`
+  - `family gate` (offline gate model, participates in family decisions)
+  - `anchor_guard`, `uncertain_nonurban_guard`, `open_set_recovery`
+  - `unknown_hint_resolution`, `unknown_review`
 
 ## Experiment governance
 
@@ -144,14 +149,18 @@ Required checks:
   - `Protocol`
   - `Comparability`
   - `Long Context Stability`
-  - `Decision Source Metrics`
-  - `Unknown Rate`
   - `Theme Metrics`
   - `Theme Confusion`
   - `U-N Family Metrics`
+  - `Decision Source Metrics`
+  - `Unknown Rate`
   - `Topic Distribution`
+  - `Boundary Bucket Metrics`
+  - `Unknown Conflict Analysis`
   - `Explainability Quality`
   - `Evidence Balance Metrics`
+  - `Bootstrap CI`
+  - `McNemar`
 - official narrative report generation is owned by `scripts/reporting/generate_stage_report.py`
 
 Stable release acceptance thresholds:

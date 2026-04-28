@@ -192,7 +192,7 @@ class DataProcessor:
         """
         Run the extraction on the Excel file using Hybrid Scheduler (Serial + Parallel).
         """
-        input_path = Path(input_file) if input_file else self.config.INPUT_FILE
+        input_path = Path(input_file) if input_file else self.config.require_default_train_input_file()
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         task_name, task_dir, output_dir = self._prepare_legacy_run_layout(input_path, timestamp)
 

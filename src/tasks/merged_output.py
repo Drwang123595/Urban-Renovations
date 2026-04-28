@@ -24,6 +24,19 @@ REVIEW_RULE_STACK_COLUMN = "\u89c4\u5219\u94fe\u8def(decision_rule_stack)"
 REVIEW_BINARY_EVIDENCE_COLUMN = "\u4e8c\u5206\u7c7b\u6253\u5206\u4f9d\u636e(binary_decision_evidence)"
 REVIEW_UNKNOWN_RECOVERY_PATH_COLUMN = "\u672a\u77e5\u6062\u590d\u8def\u5f84(unknown_recovery_path)"
 REVIEW_UNKNOWN_RECOVERY_EVIDENCE_COLUMN = "\u672a\u77e5\u6062\u590d\u8bc1\u636e(unknown_recovery_evidence)"
+REVIEW_DYNAMIC_TOPIC_ID_COLUMN = "\u52a8\u6001\u4e3b\u9898\u7f16\u53f7(dynamic_topic_id)"
+REVIEW_DYNAMIC_TOPIC_NAME_COLUMN = "\u52a8\u6001\u4e3b\u9898\u540d\u79f0(dynamic_topic_name_zh)"
+REVIEW_DYNAMIC_TOPIC_KEYWORDS_COLUMN = "\u52a8\u6001\u4e3b\u9898\u5173\u952e\u8bcd(dynamic_topic_keywords)"
+REVIEW_DYNAMIC_TOPIC_SIZE_COLUMN = "\u52a8\u6001\u4e3b\u9898\u6837\u672c\u91cf(dynamic_topic_size)"
+REVIEW_DYNAMIC_TOPIC_CONFIDENCE_COLUMN = "\u52a8\u6001\u4e3b\u9898\u7f6e\u4fe1\u5ea6(dynamic_topic_confidence)"
+REVIEW_DYNAMIC_TOPIC_SOURCE_POOL_COLUMN = "\u52a8\u6001\u4e3b\u9898\u6765\u6e90\u6c60(dynamic_topic_source_pool)"
+REVIEW_DYNAMIC_FIXED_CANDIDATE_COLUMN = "\u56fa\u5b9a\u4e3b\u9898\u5019\u9009(dynamic_to_fixed_topic_candidate)"
+REVIEW_DYNAMIC_MAPPING_STATUS_COLUMN = "\u52a8\u6001\u6620\u5c04\u72b6\u6001(dynamic_mapping_status)"
+REVIEW_DYNAMIC_BINARY_LABEL_COLUMN = "\u52a8\u6001\u4e8c\u5206\u7c7b\u5019\u9009(dynamic_binary_candidate_label)"
+REVIEW_DYNAMIC_BINARY_CONFIDENCE_COLUMN = "\u52a8\u6001\u4e8c\u5206\u7c7b\u7f6e\u4fe1\u5ea6(dynamic_binary_candidate_confidence)"
+REVIEW_DYNAMIC_BINARY_ACTION_COLUMN = "\u52a8\u6001\u4e8c\u5206\u7c7b\u6821\u51c6\u52a8\u4f5c(dynamic_binary_candidate_action)"
+REVIEW_DYNAMIC_BINARY_REASON_COLUMN = "\u52a8\u6001\u4e8c\u5206\u7c7b\u6821\u51c6\u7406\u7531(dynamic_binary_candidate_reason)"
+REVIEW_DYNAMIC_BINARY_PRIORITY_COLUMN = "\u52a8\u6001\u4e8c\u5206\u7c7b\u590d\u6838\u4f18\u5148\u7ea7(dynamic_binary_review_priority)"
 
 REVIEW_INPUT_COLUMNS = [
     Schema.TITLE,
@@ -56,6 +69,19 @@ REVIEW_DERIVED_COLUMNS = [
     REVIEW_BINARY_EVIDENCE_COLUMN,
     REVIEW_UNKNOWN_RECOVERY_PATH_COLUMN,
     REVIEW_UNKNOWN_RECOVERY_EVIDENCE_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_ID_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_NAME_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_KEYWORDS_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_SIZE_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_CONFIDENCE_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_SOURCE_POOL_COLUMN,
+    REVIEW_DYNAMIC_FIXED_CANDIDATE_COLUMN,
+    REVIEW_DYNAMIC_MAPPING_STATUS_COLUMN,
+    REVIEW_DYNAMIC_BINARY_LABEL_COLUMN,
+    REVIEW_DYNAMIC_BINARY_CONFIDENCE_COLUMN,
+    REVIEW_DYNAMIC_BINARY_ACTION_COLUMN,
+    REVIEW_DYNAMIC_BINARY_REASON_COLUMN,
+    REVIEW_DYNAMIC_BINARY_PRIORITY_COLUMN,
 ]
 
 
@@ -203,6 +229,23 @@ def build_review_ready_merged_frame(
     derived[REVIEW_BINARY_EVIDENCE_COLUMN] = _select_series(working, ["binary_decision_evidence"])
     derived[REVIEW_UNKNOWN_RECOVERY_PATH_COLUMN] = _select_series(working, ["unknown_recovery_path"])
     derived[REVIEW_UNKNOWN_RECOVERY_EVIDENCE_COLUMN] = _select_series(working, ["unknown_recovery_evidence"])
+    dynamic_column_map = {
+        REVIEW_DYNAMIC_TOPIC_ID_COLUMN: "dynamic_topic_id",
+        REVIEW_DYNAMIC_TOPIC_NAME_COLUMN: "dynamic_topic_name_zh",
+        REVIEW_DYNAMIC_TOPIC_KEYWORDS_COLUMN: "dynamic_topic_keywords",
+        REVIEW_DYNAMIC_TOPIC_SIZE_COLUMN: "dynamic_topic_size",
+        REVIEW_DYNAMIC_TOPIC_CONFIDENCE_COLUMN: "dynamic_topic_confidence",
+        REVIEW_DYNAMIC_TOPIC_SOURCE_POOL_COLUMN: "dynamic_topic_source_pool",
+        REVIEW_DYNAMIC_FIXED_CANDIDATE_COLUMN: "dynamic_to_fixed_topic_candidate",
+        REVIEW_DYNAMIC_MAPPING_STATUS_COLUMN: "dynamic_mapping_status",
+        REVIEW_DYNAMIC_BINARY_LABEL_COLUMN: "dynamic_binary_candidate_label",
+        REVIEW_DYNAMIC_BINARY_CONFIDENCE_COLUMN: "dynamic_binary_candidate_confidence",
+        REVIEW_DYNAMIC_BINARY_ACTION_COLUMN: "dynamic_binary_candidate_action",
+        REVIEW_DYNAMIC_BINARY_REASON_COLUMN: "dynamic_binary_candidate_reason",
+        REVIEW_DYNAMIC_BINARY_PRIORITY_COLUMN: "dynamic_binary_review_priority",
+    }
+    for review_column, source_column in dynamic_column_map.items():
+        derived[review_column] = _select_series(working, [source_column])
 
     return pd.concat(
         [

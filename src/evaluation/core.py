@@ -7,6 +7,12 @@ import numpy as np
 import pandas as pd
 
 from ..runtime.config import Schema
+from ..urban.dynamic_topic_discovery import (
+    STATUS_CANDIDATE_NEW_NONURBAN,
+    STATUS_CANDIDATE_NEW_URBAN,
+    STATUS_MAPPED_TO_FIXED,
+    STATUS_NEEDS_REVIEW,
+)
 from ..urban.urban_topic_taxonomy import (
     UNKNOWN_TOPIC_GROUP,
     UNKNOWN_TOPIC_LABEL,
@@ -255,6 +261,70 @@ EVIDENCE_BALANCE_OUTPUT_COLUMNS = [
     "Review Trigger Rate",
 ]
 
+DYNAMIC_TOPIC_QUALITY_OUTPUT_COLUMNS = [
+    "File",
+    "Total",
+    "Candidate Pool Count",
+    "Dynamic Topic Count",
+    "Dynamic Topic Coverage",
+    "Unknown Pool Count",
+    "Unknown Dynamic Coverage",
+    "Mapped To Fixed Count",
+    "Candidate New Urban Topic Count",
+    "Candidate New Nonurban Topic Count",
+    "Needs Review Count",
+    "Mean Dynamic Topic Confidence",
+]
+
+DYNAMIC_TOPIC_DISTRIBUTION_OUTPUT_COLUMNS = [
+    "File",
+    "Dynamic Topic ID",
+    "Dynamic Topic Name Zh",
+    "Mapping Status",
+    "Fixed Topic Candidate",
+    "Source Pool",
+    "Count",
+    "Share",
+    "Predicted Positive Rate",
+    "Truth Positive Rate",
+    "Unknown Topic Rate",
+    "Mean Confidence",
+    "Keywords",
+]
+
+DYNAMIC_FIXED_CROSSWALK_OUTPUT_COLUMNS = [
+    "File",
+    "Dynamic Topic ID",
+    "Topic Final",
+    "Topic Final Group",
+    "Count",
+    "Share Within Dynamic Topic",
+]
+
+DYNAMIC_TOPIC_CANDIDATES_OUTPUT_COLUMNS = [
+    "File",
+    "Dynamic Topic ID",
+    "Dynamic Topic Name Zh",
+    "Mapping Status",
+    "Fixed Topic Candidate",
+    "Count",
+    "Mean Confidence",
+    "Predicted Positive Rate",
+    "Unknown Topic Rate",
+    "Keywords",
+]
+
+DYNAMIC_BINARY_RECOMMENDATION_OUTPUT_COLUMNS = [
+    "File",
+    "Candidate Action",
+    "Candidate Label",
+    "Review Priority",
+    "Total",
+    "Share",
+    "Current Positive Rate",
+    "Mean Candidate Confidence",
+]
+
 
 def validate_accuracy_bounds(metrics_df: pd.DataFrame, *, context: str):
     if metrics_df.empty or "Accuracy" not in metrics_df.columns:
@@ -446,6 +516,13 @@ def _non_empty_series(frame: pd.DataFrame, column: Optional[str]) -> pd.Series:
         return pd.Series([False] * len(frame), index=frame.index, dtype=bool)
     normalized = frame[column].fillna("").astype(str).str.strip()
     return ~normalized.str.lower().isin({"", "nan", "none", "null"})
+
+
+def _dynamic_topic_present_series(frame: pd.DataFrame, column: Optional[str]) -> pd.Series:
+    if column is None or column not in frame.columns:
+        return pd.Series([False] * len(frame), index=frame.index, dtype=bool)
+    normalized = frame[column].fillna("").astype(str).str.strip().str.lower()
+    return ~normalized.isin({"", "nan", "none", "null", "-1", "-1.0"})
 
 
 def _numeric_flag_series(frame: pd.DataFrame, column: Optional[str]) -> pd.Series:
@@ -1249,6 +1326,241 @@ def summarize_evidence_balance_metrics(
     )
 
 
+def summarize_dynamic_topic_quality(
+    merged_df: pd.DataFrame,
+    source_name: str,
+) -> pd.DataFrame:
+    total = int(len(merged_df))
+    dynamic_id_col = _resolve_optional_col(merged_df, ["dynamic_topic_id"], role="pred")
+    source_pool_col = _resolve_optional_col(merged_df, ["dynamic_topic_source_pool"], role="pred")
+    status_col = _resolve_optional_col(merged_df, ["dynamic_mapping_status"], role="pred")
+    confidence_col = _resolve_optional_col(merged_df, ["dynamic_topic_confidence"], role="pred")
+
+    dynamic_present = _dynamic_topic_present_series(merged_df, dynamic_id_col)
+    source_pool = (
+        merged_df[source_pool_col].fillna("").astype(str).str.strip()
+        if source_pool_col
+        else pd.Series([""] * total, index=merged_df.index, dtype=object)
+    )
+    candidate_pool = source_pool != ""
+    unknown_pool = source_pool == "unknown_pool"
+    status = (
+        merged_df[status_col].fillna("").astype(str).str.strip()
+        if status_col
+        else pd.Series([""] * total, index=merged_df.index, dtype=object)
+    )
+    confidence = (
+        pd.to_numeric(merged_df[confidence_col], errors="coerce")
+        if confidence_col
+        else pd.Series(dtype=float)
+    )
+
+    row = {
+        "File": source_name,
+        "Total": total,
+        "Candidate Pool Count": int(candidate_pool.sum()),
+        "Dynamic Topic Count": int(merged_df.loc[dynamic_present, dynamic_id_col].nunique()) if dynamic_id_col else 0,
+        "Dynamic Topic Coverage": round(float(dynamic_present.mean()), 6) if total else 0.0,
+        "Unknown Pool Count": int(unknown_pool.sum()),
+        "Unknown Dynamic Coverage": round(float((dynamic_present & unknown_pool).sum() / unknown_pool.sum()), 6)
+        if int(unknown_pool.sum())
+        else 0.0,
+        "Mapped To Fixed Count": int(status.eq(STATUS_MAPPED_TO_FIXED).sum()),
+        "Candidate New Urban Topic Count": int(status.eq(STATUS_CANDIDATE_NEW_URBAN).sum()),
+        "Candidate New Nonurban Topic Count": int(status.eq(STATUS_CANDIDATE_NEW_NONURBAN).sum()),
+        "Needs Review Count": int(status.eq(STATUS_NEEDS_REVIEW).sum()),
+        "Mean Dynamic Topic Confidence": round(float(confidence.dropna().mean()), 6) if not confidence.dropna().empty else 0.0,
+    }
+    return pd.DataFrame([row]).reindex(columns=DYNAMIC_TOPIC_QUALITY_OUTPUT_COLUMNS)
+
+
+def summarize_dynamic_topic_distribution(
+    merged_df: pd.DataFrame,
+    source_name: str,
+) -> pd.DataFrame:
+    dynamic_id_col = _resolve_optional_col(merged_df, ["dynamic_topic_id"], role="pred")
+    if dynamic_id_col is None:
+        return pd.DataFrame(columns=DYNAMIC_TOPIC_DISTRIBUTION_OUTPUT_COLUMNS)
+
+    working = merged_df.copy()
+    dynamic_present = _dynamic_topic_present_series(working, dynamic_id_col)
+    working = working[dynamic_present].copy()
+    if working.empty:
+        return pd.DataFrame(columns=DYNAMIC_TOPIC_DISTRIBUTION_OUTPUT_COLUMNS)
+
+    name_col = _resolve_optional_col(working, ["dynamic_topic_name_zh"], role="pred")
+    status_col = _resolve_optional_col(working, ["dynamic_mapping_status"], role="pred")
+    candidate_col = _resolve_optional_col(working, ["dynamic_to_fixed_topic_candidate"], role="pred")
+    source_pool_col = _resolve_optional_col(working, ["dynamic_topic_source_pool"], role="pred")
+    confidence_col = _resolve_optional_col(working, ["dynamic_topic_confidence"], role="pred")
+    keywords_col = _resolve_optional_col(working, ["dynamic_topic_keywords"], role="pred")
+    topic_col = _resolve_optional_col(working, THEME_PRED_ALIASES, role="pred")
+    truth_col = _resolve_truth_col(working, Schema.IS_URBAN_RENEWAL)
+    pred_col = _resolve_pred_col(working, Schema.IS_URBAN_RENEWAL) or _resolve_optional_col(
+        working,
+        [Schema.IS_URBAN_RENEWAL, "final_label", "urban_flag"],
+        role="pred",
+    )
+
+    truth_norm = working[truth_col].apply(normalize_binary_value) if truth_col else pd.Series([-1] * len(working), index=working.index)
+    pred_norm = working[pred_col].apply(normalize_binary_value) if pred_col else pd.Series([-1] * len(working), index=working.index)
+    topic_norm = (
+        working[topic_col].apply(_normalize_theme_label).replace("", UNKNOWN_TOPIC_LABEL)
+        if topic_col
+        else pd.Series([UNKNOWN_TOPIC_LABEL] * len(working), index=working.index)
+    )
+
+    rows = []
+    total = len(working)
+    for dynamic_id, group in working.groupby(dynamic_id_col, dropna=False):
+        idx = group.index
+        confidence_values = pd.to_numeric(group[confidence_col], errors="coerce").dropna() if confidence_col else pd.Series(dtype=float)
+        rows.append(
+            {
+                "File": source_name,
+                "Dynamic Topic ID": dynamic_id,
+                "Dynamic Topic Name Zh": _first_non_empty(group, name_col),
+                "Mapping Status": _first_non_empty(group, status_col),
+                "Fixed Topic Candidate": _first_non_empty(group, candidate_col),
+                "Source Pool": _first_non_empty(group, source_pool_col),
+                "Count": int(len(group)),
+                "Share": round(len(group) / total, 6) if total else 0.0,
+                "Predicted Positive Rate": round(float((pred_norm.loc[idx] == 1).mean()), 6) if pred_col and len(idx) else np.nan,
+                "Truth Positive Rate": round(float((truth_norm.loc[idx] == 1).mean()), 6) if truth_col and len(idx) else np.nan,
+                "Unknown Topic Rate": round(float(topic_norm.loc[idx].eq(UNKNOWN_TOPIC_LABEL).mean()), 6) if len(idx) else 0.0,
+                "Mean Confidence": round(float(confidence_values.mean()), 6) if not confidence_values.empty else 0.0,
+                "Keywords": _first_non_empty(group, keywords_col),
+            }
+        )
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["Count", "Dynamic Topic ID"], ascending=[False, True])
+        .reindex(columns=DYNAMIC_TOPIC_DISTRIBUTION_OUTPUT_COLUMNS)
+    )
+
+
+def summarize_dynamic_fixed_crosswalk(
+    merged_df: pd.DataFrame,
+    source_name: str,
+) -> pd.DataFrame:
+    dynamic_id_col = _resolve_optional_col(merged_df, ["dynamic_topic_id"], role="pred")
+    topic_col = _resolve_optional_col(merged_df, THEME_PRED_ALIASES, role="pred")
+    if dynamic_id_col is None or topic_col is None:
+        return pd.DataFrame(columns=DYNAMIC_FIXED_CROSSWALK_OUTPUT_COLUMNS)
+
+    working = merged_df.copy()
+    dynamic_present = _dynamic_topic_present_series(working, dynamic_id_col)
+    working = working[dynamic_present].copy()
+    if working.empty:
+        return pd.DataFrame(columns=DYNAMIC_FIXED_CROSSWALK_OUTPUT_COLUMNS)
+
+    working["_topic_final_norm"] = working[topic_col].apply(_normalize_theme_label).replace("", UNKNOWN_TOPIC_LABEL)
+    rows = []
+    dynamic_sizes = working.groupby(dynamic_id_col).size().to_dict()
+    for (dynamic_id, topic_final), group in working.groupby([dynamic_id_col, "_topic_final_norm"], dropna=False):
+        size = int(dynamic_sizes.get(dynamic_id, len(group)))
+        rows.append(
+            {
+                "File": source_name,
+                "Dynamic Topic ID": dynamic_id,
+                "Topic Final": topic_final,
+                "Topic Final Group": _theme_group(topic_final),
+                "Count": int(len(group)),
+                "Share Within Dynamic Topic": round(len(group) / size, 6) if size else 0.0,
+            }
+        )
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["Dynamic Topic ID", "Count"], ascending=[True, False])
+        .reindex(columns=DYNAMIC_FIXED_CROSSWALK_OUTPUT_COLUMNS)
+    )
+
+
+def summarize_dynamic_topic_candidates(
+    merged_df: pd.DataFrame,
+    source_name: str,
+) -> pd.DataFrame:
+    distribution = summarize_dynamic_topic_distribution(merged_df, source_name)
+    if distribution.empty:
+        return pd.DataFrame(columns=DYNAMIC_TOPIC_CANDIDATES_OUTPUT_COLUMNS)
+    candidates = distribution[
+        distribution["Mapping Status"].isin(
+            [STATUS_CANDIDATE_NEW_URBAN, STATUS_CANDIDATE_NEW_NONURBAN, STATUS_NEEDS_REVIEW]
+        )
+    ].copy()
+    return candidates.reindex(columns=DYNAMIC_TOPIC_CANDIDATES_OUTPUT_COLUMNS)
+
+
+def summarize_dynamic_binary_recommendations(
+    merged_df: pd.DataFrame,
+    source_name: str,
+) -> pd.DataFrame:
+    action_col = _resolve_optional_col(merged_df, ["dynamic_binary_candidate_action"], role="pred")
+    label_col = _resolve_optional_col(merged_df, ["dynamic_binary_candidate_label"], role="pred")
+    priority_col = _resolve_optional_col(merged_df, ["dynamic_binary_review_priority"], role="pred")
+    confidence_col = _resolve_optional_col(merged_df, ["dynamic_binary_candidate_confidence"], role="pred")
+    pred_col = _resolve_pred_col(merged_df, Schema.IS_URBAN_RENEWAL) or _resolve_optional_col(
+        merged_df,
+        [Schema.IS_URBAN_RENEWAL, "final_label", "urban_flag"],
+        role="pred",
+    )
+    if action_col is None:
+        return pd.DataFrame(columns=DYNAMIC_BINARY_RECOMMENDATION_OUTPUT_COLUMNS)
+
+    working = merged_df.copy()
+    action = working[action_col].fillna("").astype(str).str.strip()
+    working = working[~action.str.lower().isin({"", "nan", "none", "null"})].copy()
+    if working.empty:
+        return pd.DataFrame(columns=DYNAMIC_BINARY_RECOMMENDATION_OUTPUT_COLUMNS)
+
+    working["_candidate_action"] = working[action_col].fillna("").astype(str).str.strip()
+    working["_candidate_label"] = (
+        working[label_col].fillna("").astype(str).str.strip() if label_col else ""
+    )
+    working["_review_priority"] = (
+        working[priority_col].fillna("").astype(str).str.strip() if priority_col else ""
+    )
+    pred_norm = working[pred_col].apply(normalize_binary_value) if pred_col else pd.Series([-1] * len(working), index=working.index)
+
+    rows = []
+    total = len(working)
+    for (candidate_action, candidate_label, review_priority), group in working.groupby(
+        ["_candidate_action", "_candidate_label", "_review_priority"],
+        dropna=False,
+    ):
+        idx = group.index
+        confidence_values = (
+            pd.to_numeric(group[confidence_col], errors="coerce").dropna()
+            if confidence_col
+            else pd.Series(dtype=float)
+        )
+        rows.append(
+            {
+                "File": source_name,
+                "Candidate Action": candidate_action,
+                "Candidate Label": candidate_label,
+                "Review Priority": review_priority,
+                "Total": int(len(group)),
+                "Share": round(len(group) / total, 6) if total else 0.0,
+                "Current Positive Rate": round(float((pred_norm.loc[idx] == 1).mean()), 6) if pred_col else np.nan,
+                "Mean Candidate Confidence": round(float(confidence_values.mean()), 6) if not confidence_values.empty else 0.0,
+            }
+        )
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["Review Priority", "Total", "Candidate Action"], ascending=[True, False, True])
+        .reindex(columns=DYNAMIC_BINARY_RECOMMENDATION_OUTPUT_COLUMNS)
+    )
+
+
+def _first_non_empty(frame: pd.DataFrame, column: Optional[str]) -> str:
+    if column is None or column not in frame.columns:
+        return ""
+    values = frame[column].fillna("").astype(str).str.strip()
+    values = values[~values.str.lower().isin({"", "nan", "none", "null"})]
+    return str(values.iloc[0]) if not values.empty else ""
+
+
 def summarize_bootstrap_ci(
     merged_df: pd.DataFrame,
     source_name: str,
@@ -1304,6 +1616,21 @@ def summarize_mcnemar(
     if len(aligned_frames) < 2:
         return pd.DataFrame(columns=columns)
 
+    def _resolve_alignment_key(frame: pd.DataFrame) -> str | None:
+        # Aligned frames produced by `align_truth_pred` are merged on `_key` and
+        # carry suffixed title columns (`Article Title_truth` / `Article Title_pred`).
+        if Schema.TITLE in frame.columns:
+            return Schema.TITLE
+        if "_key" in frame.columns:
+            return "_key"
+        truth_title = f"{Schema.TITLE}_truth"
+        if truth_title in frame.columns:
+            return truth_title
+        pred_title = f"{Schema.TITLE}_pred"
+        if pred_title in frame.columns:
+            return pred_title
+        return None
+
     scored = []
     prepared: Dict[str, pd.DataFrame] = {}
     for name, frame in aligned_frames.items():
@@ -1311,7 +1638,11 @@ def summarize_mcnemar(
         pred_col = _resolve_pred_col(frame, Schema.IS_URBAN_RENEWAL)
         if truth_col is None or pred_col is None:
             continue
-        subset = frame[[Schema.TITLE, truth_col, pred_col]].copy()
+        key_col = _resolve_alignment_key(frame)
+        if key_col is None:
+            continue
+        subset = frame[[key_col, truth_col, pred_col]].copy()
+        subset = subset.rename(columns={key_col: "_align_key"})
         subset["correct"] = (
             subset[truth_col].apply(normalize_binary_value)
             == subset[pred_col].apply(normalize_binary_value)
@@ -1325,9 +1656,9 @@ def summarize_mcnemar(
     best_two = [name for name, _ in sorted(scored, key=lambda item: (-item[1], item[0]))[:2]]
     left = prepared[best_two[0]].rename(columns={"correct": "correct_a"})
     right = prepared[best_two[1]].rename(columns={"correct": "correct_b"})
-    merged = left[[Schema.TITLE, "correct_a"]].merge(
-        right[[Schema.TITLE, "correct_b"]],
-        on=Schema.TITLE,
+    merged = left[["_align_key", "correct_a"]].merge(
+        right[["_align_key", "correct_b"]],
+        on="_align_key",
         how="inner",
     )
     if merged.empty:

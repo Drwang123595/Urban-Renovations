@@ -45,6 +45,9 @@ def test_stage_report_exports_tables_without_pdf_dependencies(tmp_path):
     sheets = pd.ExcelFile(table_path, engine="openpyxl").sheet_names
     assert "Explainability Quality" in sheets
     assert "Evidence Balance Metrics" in sheets
+    assert "Dynamic Topic Quality" in sheets
+    assert "Dynamic Topic Distribution" in sheets
+    assert "Dynamic Binary Recommendations" in sheets
 
     stable_metrics = pd.read_excel(table_path, sheet_name="Stable Metrics", engine="openpyxl")
     values = dict(zip(stable_metrics["Field"], stable_metrics["Value"]))
@@ -53,3 +56,5 @@ def test_stage_report_exports_tables_without_pdf_dependencies(tmp_path):
     assert int(values["llm_used_sum"]) == 0
     assert "explanation_coverage" in values
     assert "binary_evidence_coverage" in values
+    assert "dynamic_topic_coverage" in values
+    assert "dynamic_possible_fn_count" in values

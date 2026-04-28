@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from .strategy_registry import PromptStrategyDefinition, PromptStrategyRegistry
 from ..runtime.config import Config
+from ..urban.urban_family_gate import load_family_gate_metadata
 
 
 MANIFEST_VERSION = "2.0"
@@ -58,6 +59,23 @@ def sha256_file(path: Path) -> str:
 def manifest_path_for_output(output_path: Path) -> Path:
     output_path = Path(output_path)
     return output_path.with_name(f"{output_path.stem}.prompt_manifest.json")
+
+
+def _runtime_feature_payload() -> Dict[str, Any]:
+    family_gate_metadata = load_family_gate_metadata(Config.URBAN_FAMILY_GATE_MODEL_PATH)
+    return {
+        "online_llm_hints_enabled": bool(Config.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED),
+        "family_gate_enabled": bool(Config.URBAN_FAMILY_GATE_ENABLED),
+        "anchor_guard_enabled": bool(Config.URBAN_ANCHOR_GUARD_ENABLED),
+        "uncertain_nonurban_guard_enabled": bool(Config.URBAN_UNCERTAIN_NONURBAN_GUARD_ENABLED),
+        "open_set_enabled": bool(Config.URBAN_OPEN_SET_ENABLED),
+        "binary_recall_calibration_enabled": bool(Config.URBAN_BINARY_RECALL_CALIBRATION_ENABLED),
+        "family_gate_model_path": str(Config.URBAN_FAMILY_GATE_MODEL_PATH.resolve()),
+        "family_gate_trained_at": family_gate_metadata.get("trained_at", ""),
+        "family_gate_training_sources": list(family_gate_metadata.get("training_sources", []) or []),
+        "family_gate_sample_count": family_gate_metadata.get("sample_count", ""),
+        "family_gate_positive_rate": family_gate_metadata.get("positive_rate", ""),
+    }
 
 
 def build_strategy_snapshot(
@@ -119,22 +137,27 @@ def build_run_prompt_manifest(
     experiment_context.setdefault("urban_method", "")
     experiment_context.setdefault("hybrid_llm_assist_enabled", None)
 
+    runtime_payload = {
+        "model_name": Config.MODEL_NAME,
+        "base_url": Config.BASE_URL,
+        "temperature": Config.TEMPERATURE,
+        "max_tokens": Config.MAX_TOKENS,
+        "timeout": Config.TIMEOUT,
+        "python_version": runtime_context["python_version"],
+        "python_executable": runtime_context["python_executable"],
+        "entrypoint": runtime_context["entrypoint"],
+        **_runtime_feature_payload(),
+    }
+    for key, value in runtime_context.items():
+        runtime_payload.setdefault(key, value)
+
     return RunPromptManifest(
         manifest_version=MANIFEST_VERSION,
         generated_at=utc_now_iso(),
         task_mode=task_mode,
         active_tasks=list(active_tasks),
         input_file=str(Path(input_file).resolve()),
-        runtime={
-            "model_name": Config.MODEL_NAME,
-            "base_url": Config.BASE_URL,
-            "temperature": Config.TEMPERATURE,
-            "max_tokens": Config.MAX_TOKENS,
-            "timeout": Config.TIMEOUT,
-            "python_version": runtime_context["python_version"],
-            "python_executable": runtime_context["python_executable"],
-            "entrypoint": runtime_context["entrypoint"],
-        },
+        runtime=runtime_payload,
         experiment=experiment_context,
         registry={
             "path": str(registry_path.resolve()),
@@ -193,6 +216,17 @@ def build_comparability_payload(
         "max_tokens": runtime.get("max_tokens"),
         "python_version": runtime.get("python_version"),
         "entrypoint": runtime.get("entrypoint"),
+        "online_llm_hints_enabled": runtime.get("online_llm_hints_enabled"),
+        "family_gate_enabled": runtime.get("family_gate_enabled"),
+        "anchor_guard_enabled": runtime.get("anchor_guard_enabled"),
+        "uncertain_nonurban_guard_enabled": runtime.get("uncertain_nonurban_guard_enabled"),
+        "open_set_enabled": runtime.get("open_set_enabled"),
+        "binary_recall_calibration_enabled": runtime.get("binary_recall_calibration_enabled"),
+        "family_gate_model_path": runtime.get("family_gate_model_path"),
+        "family_gate_trained_at": runtime.get("family_gate_trained_at"),
+        "family_gate_training_sources": runtime.get("family_gate_training_sources"),
+        "family_gate_sample_count": runtime.get("family_gate_sample_count"),
+        "family_gate_positive_rate": runtime.get("family_gate_positive_rate"),
         "task_mode": manifest.get("task_mode"),
         "experiment_track": experiment.get("experiment_track"),
         "dataset_id": experiment.get("dataset_id"),

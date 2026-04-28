@@ -163,6 +163,28 @@ def collect_report_facts(
     evidence_balance_metrics = tables.get("Evidence Balance Metrics", pd.DataFrame()).copy()
     if not evidence_balance_metrics.empty and "File" in evidence_balance_metrics.columns:
         evidence_balance_metrics = evidence_balance_metrics[evidence_balance_metrics["File"].astype(str) == file_stem].copy()
+    dynamic_topic_quality = tables.get("Dynamic Topic Quality", pd.DataFrame()).copy()
+    if not dynamic_topic_quality.empty and "File" in dynamic_topic_quality.columns:
+        dynamic_topic_quality = dynamic_topic_quality[dynamic_topic_quality["File"].astype(str) == file_stem].copy()
+    dynamic_topic_row = dynamic_topic_quality.iloc[0].to_dict() if not dynamic_topic_quality.empty else {}
+    dynamic_topic_distribution = tables.get("Dynamic Topic Distribution", pd.DataFrame()).copy()
+    if not dynamic_topic_distribution.empty and "File" in dynamic_topic_distribution.columns:
+        dynamic_topic_distribution = dynamic_topic_distribution[dynamic_topic_distribution["File"].astype(str) == file_stem].copy()
+    dynamic_binary_recommendations = tables.get("Dynamic Binary Recommendations", pd.DataFrame()).copy()
+    if not dynamic_binary_recommendations.empty and "File" in dynamic_binary_recommendations.columns:
+        dynamic_binary_recommendations = dynamic_binary_recommendations[
+            dynamic_binary_recommendations["File"].astype(str) == file_stem
+        ].copy()
+    possible_fn_count = 0
+    possible_fp_count = 0
+    high_priority_binary_review_count = 0
+    if not dynamic_binary_recommendations.empty:
+        action = dynamic_binary_recommendations.get("Candidate Action", pd.Series(dtype=object)).astype(str)
+        totals = pd.to_numeric(dynamic_binary_recommendations.get("Total", pd.Series(dtype=float)), errors="coerce").fillna(0)
+        possible_fn_count = _safe_int(totals[action == "possible_false_negative_cluster"].sum())
+        possible_fp_count = _safe_int(totals[action == "possible_false_positive_cluster"].sum())
+        priority = dynamic_binary_recommendations.get("Review Priority", pd.Series(dtype=object)).astype(str)
+        high_priority_binary_review_count = _safe_int(totals[priority == "high"].sum())
 
     pred_df = pd.read_excel(inputs.prediction_file, engine="openpyxl")
     llm_used_sum = _safe_int(pd.to_numeric(pred_df.get("llm_used", pd.Series(dtype=int)), errors="coerce").fillna(0).sum())
@@ -223,6 +245,16 @@ def collect_report_facts(
         "review_trigger_rate": _safe_float(explainability_row.get("Review Trigger Rate", 0.0)),
         "near_threshold_count": _safe_int(explainability_row.get("Near Threshold Count", 0)),
         "conflict_count": _safe_int(explainability_row.get("Conflict Count", 0)),
+        "dynamic_topic_coverage": _safe_float(dynamic_topic_row.get("Dynamic Topic Coverage", 0.0)),
+        "unknown_dynamic_coverage": _safe_float(dynamic_topic_row.get("Unknown Dynamic Coverage", 0.0)),
+        "dynamic_topic_count": _safe_int(dynamic_topic_row.get("Dynamic Topic Count", 0)),
+        "candidate_new_urban_topic_count": _safe_int(dynamic_topic_row.get("Candidate New Urban Topic Count", 0)),
+        "dynamic_possible_fn_count": possible_fn_count,
+        "dynamic_possible_fp_count": possible_fp_count,
+        "dynamic_high_priority_binary_review_count": high_priority_binary_review_count,
+        "dynamic_topic_quality": dynamic_topic_quality,
+        "dynamic_topic_distribution": dynamic_topic_distribution,
+        "dynamic_binary_recommendations": dynamic_binary_recommendations,
         "gate_status": str(run_summary.get("gate_status", "")),
         "gate_failures": list(run_summary.get("gate_failures") or []),
         "generated_at": str(run_summary.get("generated_at", "")),
@@ -269,6 +301,13 @@ def build_export_tables(
                 "review_trigger_rate": facts["review_trigger_rate"],
                 "near_threshold_count": facts["near_threshold_count"],
                 "conflict_count": facts["conflict_count"],
+                "dynamic_topic_coverage": facts["dynamic_topic_coverage"],
+                "unknown_dynamic_coverage": facts["unknown_dynamic_coverage"],
+                "dynamic_topic_count": facts["dynamic_topic_count"],
+                "candidate_new_urban_topic_count": facts["candidate_new_urban_topic_count"],
+                "dynamic_possible_fn_count": facts["dynamic_possible_fn_count"],
+                "dynamic_possible_fp_count": facts["dynamic_possible_fp_count"],
+                "dynamic_high_priority_binary_review_count": facts["dynamic_high_priority_binary_review_count"],
                 "gate_status": facts["gate_status"],
             }
         ),
@@ -305,6 +344,53 @@ def build_export_tables(
         if not facts["evidence_balance_metrics"].empty
         else pd.DataFrame(columns=["File", "Evidence Balance", "Total", "Accuracy", "FP", "FN"])
     )
+    export["Dynamic Topic Quality"] = (
+        facts["dynamic_topic_quality"].copy()
+        if not facts["dynamic_topic_quality"].empty
+        else pd.DataFrame(
+            [
+                {
+                    "File": facts["file"],
+                    "Dynamic Topic Coverage": facts["dynamic_topic_coverage"],
+                    "Unknown Dynamic Coverage": facts["unknown_dynamic_coverage"],
+                    "Dynamic Topic Count": facts["dynamic_topic_count"],
+                    "Candidate New Urban Topic Count": facts["candidate_new_urban_topic_count"],
+                }
+            ]
+        )
+    )
+    export["Dynamic Topic Distribution"] = (
+        facts["dynamic_topic_distribution"].copy()
+        if not facts["dynamic_topic_distribution"].empty
+        else pd.DataFrame(
+            columns=[
+                "File",
+                "Dynamic Topic ID",
+                "Dynamic Topic Name Zh",
+                "Mapping Status",
+                "Fixed Topic Candidate",
+                "Count",
+                "Mean Confidence",
+                "Keywords",
+            ]
+        )
+    )
+    export["Dynamic Binary Recommendations"] = (
+        facts["dynamic_binary_recommendations"].copy()
+        if not facts["dynamic_binary_recommendations"].empty
+        else pd.DataFrame(
+            columns=[
+                "File",
+                "Candidate Action",
+                "Candidate Label",
+                "Review Priority",
+                "Total",
+                "Share",
+                "Current Positive Rate",
+                "Mean Candidate Confidence",
+            ]
+        )
+    )
     for sheet_name in [
         "All Metrics",
         "Unknown Rate",
@@ -314,6 +400,11 @@ def build_export_tables(
         "Unknown Conflict Analysis",
         "Explainability Quality",
         "Evidence Balance Metrics",
+        "Dynamic Topic Quality",
+        "Dynamic Topic Distribution",
+        "Dynamic Fixed Crosswalk",
+        "Dynamic Topic Candidates",
+        "Dynamic Binary Recommendations",
         "Guardrails",
         "Run Metadata",
         "Protocol",
@@ -540,6 +631,31 @@ def build_pdf(inputs: StageReportInputs, facts: Dict[str, Any], table_export_pat
     else:
         evidence_rows.append(["not available", 0, "", "", ""])
 
+    dynamic_rows = [
+        ["Metric", "Value"],
+        ["Dynamic topic count", facts["dynamic_topic_count"]],
+        ["Dynamic topic coverage", _fmt_pct(float(facts["dynamic_topic_coverage"]))],
+        ["Unknown dynamic coverage", _fmt_pct(float(facts["unknown_dynamic_coverage"]))],
+        ["Candidate new urban topic rows", facts["candidate_new_urban_topic_count"]],
+        ["Possible false-negative review rows", facts["dynamic_possible_fn_count"]],
+        ["Possible false-positive review rows", facts["dynamic_possible_fp_count"]],
+        ["High-priority binary review rows", facts["dynamic_high_priority_binary_review_count"]],
+    ]
+    dynamic_distribution_rows = [["Dynamic Topic", "Status", "Count", "Keywords"]]
+    dynamic_distribution_df = facts["dynamic_topic_distribution"]
+    if not dynamic_distribution_df.empty:
+        for _, row in dynamic_distribution_df.head(8).iterrows():
+            dynamic_distribution_rows.append(
+                [
+                    row.get("Dynamic Topic ID", ""),
+                    row.get("Mapping Status", ""),
+                    row.get("Count", ""),
+                    row.get("Keywords", ""),
+                ]
+            )
+    else:
+        dynamic_distribution_rows.append(["not available", "", 0, ""])
+
     path_rows = [
         ["Artifact", "Path"],
         ["Prediction", inputs.prediction_file],
@@ -585,6 +701,17 @@ def build_pdf(inputs: StageReportInputs, facts: Dict[str, Any], table_export_pat
         Spacer(1, 0.2 * cm),
         _paragraph("Evidence Balance", styles["h1"], Paragraph),
         _table_from_rows(evidence_rows, styles, rl, [5.4 * cm, 2.2 * cm, 3.0 * cm, 2.0 * cm, 2.0 * cm]),
+        Spacer(1, 0.2 * cm),
+        _paragraph("Dynamic Topic Evidence", styles["h1"], Paragraph),
+        _paragraph(
+            "Dynamic topics are a local post-processing evidence layer. They do not overwrite topic_final, "
+            "urban_flag, or final_label, and they are not part of the stable gate.",
+            styles["body"],
+            Paragraph,
+        ),
+        _table_from_rows(dynamic_rows, styles, rl, [8.0 * cm, 5.0 * cm]),
+        Spacer(1, 0.2 * cm),
+        _table_from_rows(dynamic_distribution_rows, styles, rl, [3.2 * cm, 4.2 * cm, 2.0 * cm, 7.0 * cm]),
         Spacer(1, 0.2 * cm),
         _paragraph("Decision Source Breakdown", styles["h1"], Paragraph),
         _table_from_rows(decision_rows, styles, rl, [5.0 * cm, 2.0 * cm, 2.6 * cm, 2.6 * cm, 2.6 * cm, 2.6 * cm]),

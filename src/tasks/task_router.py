@@ -21,6 +21,7 @@ from ..urban.urban_hybrid_classifier import UrbanHybridClassifier
 from ..urban.urban_metadata import UrbanMetadataRecord
 from ..urban.urban_topic_classifier import UrbanTopicClassifier
 from ..urban.urban_topic_taxonomy import legacy_topic_for_label, urban_flag_for_topic_label
+from ..urban.dynamic_topic_discovery import DYNAMIC_BINARY_DEFAULTS, DYNAMIC_TOPIC_DEFAULTS
 
 
 class TaskType(Enum):
@@ -49,6 +50,9 @@ URBAN_EXPLAINABILITY_CONTRACT_DEFAULTS = {
     "unknown_recovery_path": "",
     "unknown_recovery_evidence": "",
 }
+
+URBAN_DYNAMIC_TOPIC_CONTRACT_DEFAULTS = dict(DYNAMIC_TOPIC_DEFAULTS)
+URBAN_DYNAMIC_BINARY_CONTRACT_DEFAULTS = dict(DYNAMIC_BINARY_DEFAULTS)
 
 
 class TaskRouter:
@@ -218,7 +222,7 @@ class TaskRouter:
     ) -> Path:
         print("\n[INFO] Running Urban Renewal Classification only...")
 
-        input_path = Path(input_file) if input_file else self.config.INPUT_FILE
+        input_path = Path(input_file) if input_file else self.config.require_default_train_input_file()
         task_name = input_path.stem
 
         timestamp = run_id or time.strftime("%Y%m%d_%H%M%S")
@@ -439,7 +443,7 @@ class TaskRouter:
     ) -> Path:
         print("\n[INFO] Running Spatial Attribute Extraction only...")
 
-        input_path = Path(input_file) if input_file else self.config.INPUT_FILE
+        input_path = Path(input_file) if input_file else self.config.require_default_train_input_file()
         task_name = input_path.stem
 
         timestamp = run_id or time.strftime("%Y%m%d_%H%M%S")
@@ -777,12 +781,29 @@ class TaskRouter:
             "primary_negative_evidence",
             "evidence_balance",
             "decision_rule_stack",
+            "dynamic_topic_id",
+            "dynamic_topic_name_zh",
+            "dynamic_topic_keywords",
+            "dynamic_topic_size",
+            "dynamic_topic_confidence",
+            "dynamic_topic_source_pool",
+            "dynamic_to_fixed_topic_candidate",
+            "dynamic_mapping_status",
+            "dynamic_binary_candidate_label",
+            "dynamic_binary_candidate_confidence",
+            "dynamic_binary_candidate_action",
+            "dynamic_binary_candidate_reason",
+            "dynamic_binary_review_priority",
             "decision_source",
             "decision_reason",
         ]:
             if column in result:
                 output[column] = result[column]
         for column, default_value in URBAN_EXPLAINABILITY_CONTRACT_DEFAULTS.items():
+            output.setdefault(column, default_value)
+        for column, default_value in URBAN_DYNAMIC_TOPIC_CONTRACT_DEFAULTS.items():
+            output.setdefault(column, default_value)
+        for column, default_value in URBAN_DYNAMIC_BINARY_CONTRACT_DEFAULTS.items():
             output.setdefault(column, default_value)
         if "final_label" in output and output.get("final_label") in (None, ""):
             output["final_label"] = urban_label

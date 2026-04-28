@@ -6,11 +6,14 @@ import pandas as pd
 from scripts.pipeline.run_stable_release import (
     DEFAULT_DATASET_ID,
     DEFAULT_TAG,
+    STABLE_RUNTIME_FLAG_OVERRIDES,
     StableThresholds,
     build_classification_command,
     build_paths,
+    stable_child_env,
     validate_gates,
 )
+from scripts.evaluation.evaluate import REQUIRED_SUMMARY_SHEETS
 from src.runtime.project_paths import dataset_paths, run_paths
 
 
@@ -75,6 +78,12 @@ def test_stable_pipeline_entry_locks_paths_and_command():
     assert "--hybrid-llm-assist on" in command_text
     assert "--order-id canonical_title_order" in command_text
     assert "--max-samples-per-window 50" in command_text
+
+
+def test_stable_pipeline_locks_runtime_flags_in_child_env():
+    env = stable_child_env()
+    for key, value in STABLE_RUNTIME_FLAG_OVERRIDES.items():
+        assert env.get(key) == value
 
 
 def test_project_paths_define_canonical_input_and_run_layout():
@@ -154,6 +163,21 @@ def test_report_dependencies_are_declared_in_recommended_install_targets():
 def test_stable_release_doc_records_thresholds_and_artifacts():
     doc_text = (PROJECT_ROOT / "doc" / "evaluation_baseline_20260408.md").read_text(encoding="utf-8")
     assert "stable release as of 2026-04-27" in doc_text
+    assert "main entry fixed to `scripts/pipeline/main_py313.py`" in doc_text
+    assert "only `scripts/evaluation/evaluate.py` may generate official acceptance summaries" in doc_text
+    assert "- Main entry: `scripts/pipeline/main_py313.py`" in doc_text
+    assert "- Stable pipeline entry: `scripts/pipeline/run_stable_release.py`" in doc_text
+    assert "Evaluate all outputs with `scripts/evaluation/evaluate.py`" in doc_text
+    assert (
+        ".venv-bertopic313\\Scripts\\python.exe scripts\\pipeline\\run_stable_release.py --skip-classification"
+        in doc_text
+    )
+    assert "This smoke is not a full run and must not be cited as an experiment result." in doc_text
+    assert "It uses `local_topic_classifier` only and does not call the LLM API." in doc_text
+    assert "--urban-method local_topic_classifier --hybrid-llm-assist off --limit 10" in doc_text
+    assert 'tmp\\stability_smoke\\local_topic_classifier_limit10.xlsx' in doc_text
+    assert "--strict --strict-truth-match --coverage-threshold 0.01" in doc_text
+    assert "root-level `scripts/*.py` entries are legacy compatibility wrappers only" in doc_text
     assert f"runs/stable_release/{DEFAULT_TAG}" in doc_text
     assert "Data/<dataset_id>/input/labels/<dataset_id>.xlsx" in doc_text
     assert "deepseek-v4-flash" in doc_text
@@ -180,6 +204,18 @@ def test_stable_release_metrics_meet_locked_thresholds():
     assert float(urban["F1"]) >= 0.948
     assert int(urban["FP"]) <= 34
     assert int(urban["FN"]) <= 48
+
+
+def test_eval_summary_contains_required_sheets():
+    sheet_names = pd.ExcelFile(STABLE_SUMMARY_FILE, engine="openpyxl").sheet_names
+    missing = [sheet for sheet in REQUIRED_SUMMARY_SHEETS if sheet not in sheet_names]
+    assert missing == []
+
+
+def test_stable_release_protocol_includes_family_gate_metadata():
+    protocol_df = pd.read_excel(STABLE_SUMMARY_FILE, sheet_name="Protocol", engine="openpyxl")
+    fields = set(protocol_df["Field"].astype(str).tolist())
+    assert {"family_gate_enabled", "online_llm_hints_enabled", "family_gate_model_path"}.issubset(fields)
 
 
 def test_stable_release_decision_source_and_unknown_contract():

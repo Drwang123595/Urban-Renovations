@@ -61,16 +61,14 @@ class Config:
     STABLE_RELEASE_LABEL_FILE = (
         dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).label_file
     )
-    STABLE_RELEASE_RESULT_DIR = STABLE_RELEASE_RUNS_DIR / "stable_release" / "20260417_unknown_recovery" / "reports"
-    STABLE_RELEASE_OUTPUT_DIR = STABLE_RELEASE_RUNS_DIR / "stable_release" / "20260417_unknown_recovery" / "predictions"
     OUTPUT_DIR = PROJECT_ROOT / "output"
     MODELS_DIR = OUTPUT_DIR / "models"
     BERTOPIC_ARTIFACT_DIR = MODELS_DIR / "urban_bertopic_online_py313"
     URBAN_FAMILY_GATE_MODEL_PATH = MODELS_DIR / "urban_family_gate.joblib"
     URBAN_FAMILY_GATE_BOUNDARY_PACKAGE_PATH = OUTPUT_DIR / "doc" / "urban_family_gate_boundary_package.xlsx"
     PY313_VENV_PYTHON = PROJECT_ROOT / ".venv-bertopic313" / "Scripts" / "python.exe"
-    
-    INPUT_FILE = TRAIN_DIR / "test1.xlsx" # Updated default
+
+    INPUT_FILE = TRAIN_DIR / f"{LEGACY_BASELINE_DATASET_ID}.xlsx"
     
     # History Paths
     HISTORY_DIR = PROJECT_ROOT / "history"
@@ -419,6 +417,35 @@ class Config:
         cls.TRAIN_DIR.mkdir(parents=True, exist_ok=True)
         cls.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         cls.MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def default_train_input_file(cls) -> Optional[Path]:
+        preferred = Path(cls.INPUT_FILE)
+        if preferred.exists():
+            return preferred
+        if not cls.TRAIN_DIR.exists():
+            return None
+        candidates = sorted(cls.TRAIN_DIR.glob("*.xlsx"), key=lambda item: item.name.lower())
+        if not candidates:
+            return None
+        return candidates[0]
+
+    @classmethod
+    def require_default_train_input_file(cls) -> Path:
+        resolved = cls.default_train_input_file()
+        if resolved is None:
+            raise FileNotFoundError(
+                f"No training workbook found under {cls.TRAIN_DIR}. Pass --input explicitly."
+            )
+        return resolved
+
+    @classmethod
+    def stable_release_result_dir(cls, tag: str) -> Path:
+        return cls.STABLE_RELEASE_RUNS_DIR / "stable_release" / str(tag) / "reports"
+
+    @classmethod
+    def stable_release_output_dir(cls, tag: str) -> Path:
+        return cls.STABLE_RELEASE_RUNS_DIR / "stable_release" / str(tag) / "predictions"
 
     @classmethod
     def validate_runtime_environment(

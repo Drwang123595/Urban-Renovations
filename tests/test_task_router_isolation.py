@@ -10,6 +10,19 @@ from src.merged_output import (
     REVIEW_BINARY_EVIDENCE_COLUMN,
     REVIEW_DERIVED_COLUMNS,
     REVIEW_DECISION_EXPLANATION_COLUMN,
+    REVIEW_DYNAMIC_BINARY_ACTION_COLUMN,
+    REVIEW_DYNAMIC_BINARY_CONFIDENCE_COLUMN,
+    REVIEW_DYNAMIC_BINARY_LABEL_COLUMN,
+    REVIEW_DYNAMIC_BINARY_PRIORITY_COLUMN,
+    REVIEW_DYNAMIC_BINARY_REASON_COLUMN,
+    REVIEW_DYNAMIC_FIXED_CANDIDATE_COLUMN,
+    REVIEW_DYNAMIC_MAPPING_STATUS_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_CONFIDENCE_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_ID_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_KEYWORDS_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_NAME_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_SIZE_COLUMN,
+    REVIEW_DYNAMIC_TOPIC_SOURCE_POOL_COLUMN,
     REVIEW_EVIDENCE_BALANCE_COLUMN,
     REVIEW_INPUT_COLUMNS,
     REVIEW_NEGATIVE_EVIDENCE_COLUMN,
@@ -216,6 +229,10 @@ def test_build_urban_output_row_resolves_blank_unknown_label_to_binary_default()
     assert row["decision_source"] == "unknown_review"
     assert row["review_flag"] == 1
     assert row["bertopic_hint_label"] == "N3"
+    assert row["dynamic_topic_id"] == ""
+    assert row["dynamic_mapping_status"] == ""
+    assert row["dynamic_binary_candidate_label"] == ""
+    assert row["dynamic_binary_candidate_action"] == ""
 
 
 def test_load_task_input_frame_backfills_publication_year_from_train(tmp_path):
@@ -298,6 +315,19 @@ def test_build_review_ready_merged_frame_preserves_source_input_columns():
                 "binary_decision_evidence": "raw_score=0.9300",
                 "unknown_recovery_path": "not_triggered",
                 "unknown_recovery_evidence": "",
+                "dynamic_topic_id": "DUR_0001",
+                "dynamic_topic_name_zh": "\u68d5\u5730\u518d\u5f00\u53d1",
+                "dynamic_topic_keywords": "brownfield; redevelopment",
+                "dynamic_topic_size": 12,
+                "dynamic_topic_confidence": 0.88,
+                "dynamic_topic_source_pool": "unknown_pool",
+                "dynamic_to_fixed_topic_candidate": "U2",
+                "dynamic_mapping_status": "mapped_to_fixed",
+                "dynamic_binary_candidate_label": "1",
+                "dynamic_binary_candidate_confidence": 0.88,
+                "dynamic_binary_candidate_action": "supports_current_label",
+                "dynamic_binary_candidate_reason": "dynamic_topic=DUR_0001",
+                "dynamic_binary_review_priority": "low",
             }
         ]
     )
@@ -326,6 +356,19 @@ def test_build_review_ready_merged_frame_preserves_source_input_columns():
     assert review.at[0, REVIEW_BINARY_EVIDENCE_COLUMN] == "raw_score=0.9300"
     assert review.at[0, REVIEW_UNKNOWN_RECOVERY_PATH_COLUMN] == "not_triggered"
     assert review.at[0, REVIEW_UNKNOWN_RECOVERY_EVIDENCE_COLUMN] == ""
+    assert review.at[0, REVIEW_DYNAMIC_TOPIC_ID_COLUMN] == "DUR_0001"
+    assert review.at[0, REVIEW_DYNAMIC_TOPIC_NAME_COLUMN] == "\u68d5\u5730\u518d\u5f00\u53d1"
+    assert review.at[0, REVIEW_DYNAMIC_TOPIC_KEYWORDS_COLUMN] == "brownfield; redevelopment"
+    assert review.at[0, REVIEW_DYNAMIC_TOPIC_SIZE_COLUMN] == 12
+    assert review.at[0, REVIEW_DYNAMIC_TOPIC_CONFIDENCE_COLUMN] == 0.88
+    assert review.at[0, REVIEW_DYNAMIC_TOPIC_SOURCE_POOL_COLUMN] == "unknown_pool"
+    assert review.at[0, REVIEW_DYNAMIC_FIXED_CANDIDATE_COLUMN] == "U2"
+    assert review.at[0, REVIEW_DYNAMIC_MAPPING_STATUS_COLUMN] == "mapped_to_fixed"
+    assert review.at[0, REVIEW_DYNAMIC_BINARY_LABEL_COLUMN] == "1"
+    assert review.at[0, REVIEW_DYNAMIC_BINARY_CONFIDENCE_COLUMN] == 0.88
+    assert review.at[0, REVIEW_DYNAMIC_BINARY_ACTION_COLUMN] == "supports_current_label"
+    assert review.at[0, REVIEW_DYNAMIC_BINARY_REASON_COLUMN] == "dynamic_topic=DUR_0001"
+    assert review.at[0, REVIEW_DYNAMIC_BINARY_PRIORITY_COLUMN] == "low"
 
 
 def test_topic_name_zh_for_label_covers_nonurban_and_unknown():

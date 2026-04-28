@@ -86,6 +86,23 @@ def _empty_bertopic_signal() -> BERTopicSignal:
     )
 
 
+def load_family_gate_metadata(model_path: Optional[Path] = None) -> Dict[str, Any]:
+    path = Path(model_path or Config.URBAN_FAMILY_GATE_MODEL_PATH)
+    if not path.exists():
+        return {}
+    try:
+        from joblib import load
+    except Exception:
+        return {}
+    try:
+        payload = load(path)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return dict(payload.get("metadata", {}) or {})
+
+
 @dataclass
 class FamilyGateDecision:
     rule_family: str

@@ -9,7 +9,7 @@ Current experiment governance is split into three tracks:
 1. `stable_release`
    - current hybrid mainline only
    - dataset fixed to `Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407`
-   - main entry fixed to `scripts/main_py313.py`
+   - main entry fixed to `scripts/pipeline/main_py313.py`
 2. `research_matrix`
    - method comparison
    - long-context order-stability protocol
@@ -19,12 +19,12 @@ Current experiment governance is split into three tracks:
 
 Current evaluation contract:
 
-- only `scripts/evaluate.py` may generate official acceptance summaries
+- only `scripts/evaluation/evaluate.py` may generate official acceptance summaries
 - `Accuracy` remains on a `0-100` scale
 - `Precision`, `Recall`, `F1` remain on a `0-1` scale
 - any `Accuracy > 100` is invalid
 - strict tracks allow truth binding only by explicit `--truth` or a unique label workbook
-- `scripts/main.py` is now legacy compatibility only
+- root-level `scripts/*.py` entries are legacy compatibility wrappers only
 
 ## Canonical directory layout
 
@@ -52,8 +52,8 @@ Legacy folders are retained for historical comparison only:
 ## Locked stable release
 
 - Runtime: Python `3.13`
-- Main entry: `scripts/main_py313.py`
-- Stable pipeline entry: `scripts/run_stable_release.py`
+- Main entry: `scripts/pipeline/main_py313.py`
+- Stable pipeline entry: `scripts/pipeline/run_stable_release.py`
 - Stable mode: `three_stage_hybrid --hybrid-llm-assist on`
 - Stable model: `deepseek-v4-flash`
 - Stable result directory:
@@ -62,6 +62,8 @@ Legacy folders are retained for historical comparison only:
   - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/predictions/urban_renewal_three_stage_hybrid_few_llm_on_20260427_deepseek_v4_flash_stable.xlsx`
 - Stable review pool:
   - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reviews/Unknown_Review_hybrid_llm_on_20260427_deepseek_v4_flash_stable.xlsx`
+- Stable run summary (auditable runtime + family gate metadata):
+  - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/Stable_Run_Summary.json`
 
 ## Locked metrics
 
@@ -104,7 +106,7 @@ The following are required before calling any new version stable:
    - `local_topic_classifier`
    - `three_stage_hybrid --hybrid-llm-assist off`
    - `three_stage_hybrid --hybrid-llm-assist on`
-3. Evaluate all outputs with `scripts/evaluate.py`
+3. Evaluate all outputs with `scripts/evaluation/evaluate.py`
    - Required sheets:
      - `All Metrics`
      - `Run Metadata`
@@ -123,10 +125,22 @@ The following are required before calling any new version stable:
 Single-run stable pipeline:
 
 ```powershell
-.venv-bertopic313\Scripts\python.exe scripts\run_stable_release.py --skip-classification
+.venv-bertopic313\Scripts\python.exe scripts\pipeline\run_stable_release.py --skip-classification
 ```
 
 Use `--force` only when intentionally re-running and overwriting the locked 1000-sample prediction workbook.
+
+Local stability smoke only:
+
+- This smoke is not a full run and must not be cited as an experiment result.
+- It uses `local_topic_classifier` only and does not call the LLM API.
+- Because `--limit 10` covers only 1% of the 1000-row truth workbook, strict evaluation must lower the coverage threshold to `0.01`.
+
+```powershell
+.venv-bertopic313\Scripts\python.exe scripts\pipeline\main_py313.py --non-interactive --task urban_renewal --experiment-track research_matrix --input "Data\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\input\labels\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --truth-file "Data\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\input\labels\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --urban-method local_topic_classifier --hybrid-llm-assist off --limit 10 --output "tmp\stability_smoke\local_topic_classifier_limit10.xlsx"
+
+.venv-bertopic313\Scripts\python.exe scripts\evaluation\evaluate.py --experiment-track research_matrix --truth "Data\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\input\labels\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --pred "tmp\stability_smoke\local_topic_classifier_limit10.xlsx" --report-dir "tmp\stability_smoke\reports" --pred-scope urban_renewal --strict --strict-truth-match --coverage-threshold 0.01
+```
 
 Long-context comparison rule:
 

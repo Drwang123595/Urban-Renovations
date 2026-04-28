@@ -389,14 +389,10 @@ def normalize_order_id(order_id: str | None) -> str:
 
 
 def default_train_input() -> str | None:
-    if Config.INPUT_FILE.exists():
-        return str(Config.INPUT_FILE)
-    if not Config.TRAIN_DIR.exists():
+    resolved = Config.default_train_input_file()
+    if resolved is None:
         return None
-    candidates = sorted(Config.TRAIN_DIR.glob("*.xlsx"), key=lambda item: item.name.lower())
-    if not candidates:
-        return None
-    return str(candidates[0])
+    return str(resolved)
 
 
 def is_train_scoped_input(input_value: str | None) -> bool:

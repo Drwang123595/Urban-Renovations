@@ -17,6 +17,11 @@ from src.evaluation.core import (
     normalize_binary_value,
     summarize_mcnemar,
     summarize_decision_source_metrics,
+    summarize_dynamic_binary_recommendations,
+    summarize_dynamic_fixed_crosswalk,
+    summarize_dynamic_topic_candidates,
+    summarize_dynamic_topic_distribution,
+    summarize_dynamic_topic_quality,
     summarize_chunked_binary_metrics,
     summarize_evidence_balance_metrics,
     summarize_explainability_quality,
@@ -37,6 +42,7 @@ from src.prompting.manifest import (
     manifest_path_for_output,
 )
 from src.runtime.config import Config, Schema
+from src.urban.urban_family_gate import load_family_gate_metadata
 from src.urban.urban_training_contract import allowed_training_workbooks, assert_training_source_contract
 
 
@@ -120,6 +126,72 @@ URBAN_ERROR_CATEGORY_RULES = [
 STRICT_TRUTH_TRACKS = {"stable_release", "research_matrix"}
 LONG_CONTEXT_ACCURACY_DELTA_THRESHOLD = 1.5
 LONG_CONTEXT_F1_DELTA_THRESHOLD = 0.015
+REQUIRED_SUMMARY_SHEETS = (
+    "All Metrics",
+    "Run Metadata",
+    "Protocol",
+    "Comparability",
+    "Long Context Stability",
+    "Theme Metrics",
+    "Theme Confusion",
+    "U-N Family Metrics",
+    "Unknown Rate",
+    "Decision Source Metrics",
+    "Topic Distribution",
+    "Boundary Bucket Metrics",
+    "Unknown Conflict Analysis",
+    "Explainability Quality",
+    "Evidence Balance Metrics",
+    "Dynamic Topic Quality",
+    "Dynamic Topic Distribution",
+    "Dynamic Fixed Crosswalk",
+    "Dynamic Topic Candidates",
+    "Dynamic Binary Recommendations",
+    "Bootstrap CI",
+    "McNemar",
+)
+
+
+def _runtime_bool(raw: object) -> bool | str:
+    if raw in {"", None}:
+        return ""
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _manifest_runtime_snapshot(manifest: dict | None) -> dict:
+    runtime = dict((manifest or {}).get("runtime") or {})
+    family_gate_metadata = load_family_gate_metadata()
+    runtime.setdefault("online_llm_hints_enabled", bool(Config.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED))
+    runtime.setdefault("family_gate_enabled", bool(Config.URBAN_FAMILY_GATE_ENABLED))
+    runtime.setdefault("anchor_guard_enabled", bool(Config.URBAN_ANCHOR_GUARD_ENABLED))
+    runtime.setdefault("uncertain_nonurban_guard_enabled", bool(Config.URBAN_UNCERTAIN_NONURBAN_GUARD_ENABLED))
+    runtime.setdefault("open_set_enabled", bool(Config.URBAN_OPEN_SET_ENABLED))
+    runtime.setdefault("binary_recall_calibration_enabled", bool(Config.URBAN_BINARY_RECALL_CALIBRATION_ENABLED))
+    runtime.setdefault("family_gate_model_path", str(Config.URBAN_FAMILY_GATE_MODEL_PATH.resolve()))
+    runtime.setdefault("family_gate_trained_at", family_gate_metadata.get("trained_at", ""))
+    runtime.setdefault("family_gate_training_sources", list(family_gate_metadata.get("training_sources", []) or []))
+    runtime.setdefault("family_gate_sample_count", family_gate_metadata.get("sample_count", ""))
+    runtime.setdefault("family_gate_positive_rate", family_gate_metadata.get("positive_rate", ""))
+    return runtime
+
+
+def _unique_metadata_value(frame: pd.DataFrame, column: str) -> str:
+    if frame.empty or column not in frame.columns:
+        return ""
+    values: list[str] = []
+    for raw in frame[column].tolist():
+        if isinstance(raw, list):
+            items = [str(item) for item in raw if str(item).strip()]
+            if items:
+                values.append(";".join(items))
+            continue
+        if pd.isna(raw) or str(raw).strip() == "":
+            continue
+        values.append(str(raw))
+    ordered = list(dict.fromkeys(values))
+    return " | ".join(ordered)
 
 
 def list_tasks():
@@ -324,6 +396,26 @@ def evaluate_one_file(
         alignment.merged,
         source_name=pred_file.stem,
     )
+    dynamic_topic_quality_df = summarize_dynamic_topic_quality(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
+    dynamic_topic_distribution_df = summarize_dynamic_topic_distribution(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
+    dynamic_fixed_crosswalk_df = summarize_dynamic_fixed_crosswalk(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
+    dynamic_topic_candidates_df = summarize_dynamic_topic_candidates(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
+    dynamic_binary_recommendations_df = summarize_dynamic_binary_recommendations(
+        alignment.merged,
+        source_name=pred_file.stem,
+    )
     bootstrap_ci_df = summarize_bootstrap_ci(
         alignment.merged,
         source_name=pred_file.stem,
@@ -352,6 +444,11 @@ def evaluate_one_file(
         unknown_conflict_df.to_excel(writer, sheet_name="Unknown Conflict Analysis", index=False)
         explainability_quality_df.to_excel(writer, sheet_name="Explainability Quality", index=False)
         evidence_balance_df.to_excel(writer, sheet_name="Evidence Balance Metrics", index=False)
+        dynamic_topic_quality_df.to_excel(writer, sheet_name="Dynamic Topic Quality", index=False)
+        dynamic_topic_distribution_df.to_excel(writer, sheet_name="Dynamic Topic Distribution", index=False)
+        dynamic_fixed_crosswalk_df.to_excel(writer, sheet_name="Dynamic Fixed Crosswalk", index=False)
+        dynamic_topic_candidates_df.to_excel(writer, sheet_name="Dynamic Topic Candidates", index=False)
+        dynamic_binary_recommendations_df.to_excel(writer, sheet_name="Dynamic Binary Recommendations", index=False)
         bootstrap_ci_df.to_excel(writer, sheet_name="Bootstrap CI", index=False)
         chunk_metrics_df.to_excel(writer, sheet_name="Chunk Metrics", index=False)
         guardrail_df.to_excel(writer, sheet_name="Guardrails", index=False)
@@ -372,6 +469,11 @@ def evaluate_one_file(
         unknown_conflict_df,
         explainability_quality_df,
         evidence_balance_df,
+        dynamic_topic_quality_df,
+        dynamic_topic_distribution_df,
+        dynamic_fixed_crosswalk_df,
+        dynamic_topic_candidates_df,
+        dynamic_binary_recommendations_df,
         bootstrap_ci_df,
         report_path,
     )
@@ -530,7 +632,25 @@ def build_urban_error_analysis(
     return pd.DataFrame(rows).reindex(columns=URBAN_ERROR_OUTPUT_COLUMNS)
 
 
-def build_protocol_df(args, pred_files, truth_files, report_dir: Path) -> pd.DataFrame:
+def build_protocol_df(
+    args,
+    pred_files,
+    truth_files,
+    report_dir: Path,
+    run_metadata_df: pd.DataFrame,
+    decision_source_df: pd.DataFrame,
+) -> pd.DataFrame:
+    decision_sources = ""
+    if not decision_source_df.empty and "Decision Source" in decision_source_df.columns:
+        decision_sources = ";".join(
+            sorted(
+                {
+                    str(value).strip()
+                    for value in decision_source_df["Decision Source"].dropna().tolist()
+                    if str(value).strip()
+                }
+            )
+        )
     rows = [
         {"Field": "experiment_track", "Value": args.experiment_track},
         {"Field": "pred_scope", "Value": args.pred_scope},
@@ -541,12 +661,31 @@ def build_protocol_df(args, pred_files, truth_files, report_dir: Path) -> pd.Dat
         {"Field": "long_context_f1_delta_threshold", "Value": LONG_CONTEXT_F1_DELTA_THRESHOLD},
         {
             "Field": "required_summary_sheets",
-            "Value": "All Metrics;Run Metadata;Protocol;Comparability;Long Context Stability;Decision Source Metrics;Unknown Rate;Boundary Bucket Metrics;Unknown Conflict Analysis;Bootstrap CI;McNemar",
+            "Value": ";".join(REQUIRED_SUMMARY_SHEETS),
+        },
+        {
+            "Field": "single_file_summary_policy",
+            "Value": "Single-file summaries may leave McNemar and Long Context Stability schema-only.",
+        },
+        {
+            "Field": "multi_file_summary_policy",
+            "Value": "Comparable multi-file matrices must populate Bootstrap CI and McNemar. Long Context Stability becomes non-empty only when cross_paper_long_context orders are present.",
+        },
+        {
+            "Field": "decision_source_contract",
+            "Value": decision_sources,
         },
         {
             "Field": "training_sources",
             "Value": ";".join(str(path.resolve()) for path in allowed_training_workbooks(Config.TRAIN_DIR)),
         },
+        {"Field": "family_gate_enabled", "Value": _unique_metadata_value(run_metadata_df, "family_gate_enabled")},
+        {"Field": "online_llm_hints_enabled", "Value": _unique_metadata_value(run_metadata_df, "online_llm_hints_enabled")},
+        {"Field": "family_gate_model_path", "Value": _unique_metadata_value(run_metadata_df, "family_gate_model_path")},
+        {"Field": "family_gate_trained_at", "Value": _unique_metadata_value(run_metadata_df, "family_gate_trained_at")},
+        {"Field": "family_gate_training_sources", "Value": _unique_metadata_value(run_metadata_df, "family_gate_training_sources")},
+        {"Field": "family_gate_sample_count", "Value": _unique_metadata_value(run_metadata_df, "family_gate_sample_count")},
+        {"Field": "family_gate_positive_rate", "Value": _unique_metadata_value(run_metadata_df, "family_gate_positive_rate")},
         {"Field": "prediction_file_count", "Value": len(pred_files)},
         {"Field": "truth_file_count", "Value": len(truth_files)},
         {"Field": "report_dir", "Value": str(report_dir.resolve())},
@@ -769,6 +908,11 @@ def _new_frame_collections() -> dict[str, list[pd.DataFrame]]:
         "unknown_conflict_metrics": [],
         "explainability_quality": [],
         "evidence_balance_metrics": [],
+        "dynamic_topic_quality": [],
+        "dynamic_topic_distributions": [],
+        "dynamic_fixed_crosswalk": [],
+        "dynamic_topic_candidates": [],
+        "dynamic_binary_recommendations": [],
         "bootstrap_ci": [],
     }
 
@@ -790,6 +934,11 @@ def _append_evaluated_frames(frames: dict[str, list[pd.DataFrame]], evaluated) -
         unknown_conflict_df,
         explainability_quality_df,
         evidence_balance_df,
+        dynamic_topic_quality_df,
+        dynamic_topic_distribution_df,
+        dynamic_fixed_crosswalk_df,
+        dynamic_topic_candidates_df,
+        dynamic_binary_recommendations_df,
         bootstrap_ci_df,
         report_path,
     ) = evaluated
@@ -807,6 +956,11 @@ def _append_evaluated_frames(frames: dict[str, list[pd.DataFrame]], evaluated) -
     frames["unknown_conflict_metrics"].append(unknown_conflict_df)
     frames["explainability_quality"].append(explainability_quality_df)
     frames["evidence_balance_metrics"].append(evidence_balance_df)
+    frames["dynamic_topic_quality"].append(dynamic_topic_quality_df)
+    frames["dynamic_topic_distributions"].append(dynamic_topic_distribution_df)
+    frames["dynamic_fixed_crosswalk"].append(dynamic_fixed_crosswalk_df)
+    frames["dynamic_topic_candidates"].append(dynamic_topic_candidates_df)
+    frames["dynamic_binary_recommendations"].append(dynamic_binary_recommendations_df)
     frames["bootstrap_ci"].append(bootstrap_ci_df)
     return aligned_merged_df, guardrail_df, report_path
 
@@ -838,7 +992,7 @@ def _metadata_rows_for_prediction(
         "comparable_with_first": comparable,
         "comparability_issues": ";".join(mismatches),
     }
-    runtime = (manifest or {}).get("runtime") or {}
+    runtime = _manifest_runtime_snapshot(manifest)
     experiment = (manifest or {}).get("experiment") or {}
     run_metadata_row = {
         "prediction_file": pred_file.name,
@@ -859,6 +1013,17 @@ def _metadata_rows_for_prediction(
         "pred_scope": experiment.get("pred_scope", args.pred_scope),
         "urban_method": experiment.get("urban_method", ""),
         "hybrid_llm_assist_enabled": experiment.get("hybrid_llm_assist_enabled", ""),
+        "family_gate_enabled": _runtime_bool(runtime.get("family_gate_enabled")),
+        "online_llm_hints_enabled": _runtime_bool(runtime.get("online_llm_hints_enabled")),
+        "anchor_guard_enabled": _runtime_bool(runtime.get("anchor_guard_enabled")),
+        "uncertain_nonurban_guard_enabled": _runtime_bool(runtime.get("uncertain_nonurban_guard_enabled")),
+        "open_set_enabled": _runtime_bool(runtime.get("open_set_enabled")),
+        "binary_recall_calibration_enabled": _runtime_bool(runtime.get("binary_recall_calibration_enabled")),
+        "family_gate_model_path": runtime.get("family_gate_model_path", ""),
+        "family_gate_trained_at": runtime.get("family_gate_trained_at", ""),
+        "family_gate_training_sources": ";".join(runtime.get("family_gate_training_sources", []) or []),
+        "family_gate_sample_count": runtime.get("family_gate_sample_count", ""),
+        "family_gate_positive_rate": runtime.get("family_gate_positive_rate", ""),
         "comparability_signature": signature,
         "long_context_group_signature": long_context_signature,
     }
@@ -994,6 +1159,11 @@ def _write_summary_workbook(args, pred_files, truth_files, report_dir: Path, sta
     merged_unknown_conflicts = _concat_frames(frames["unknown_conflict_metrics"])
     merged_explainability_quality = _concat_frames(frames["explainability_quality"])
     merged_evidence_balance_metrics = _concat_frames(frames["evidence_balance_metrics"])
+    merged_dynamic_topic_quality = _concat_frames(frames["dynamic_topic_quality"])
+    merged_dynamic_topic_distributions = _concat_frames(frames["dynamic_topic_distributions"])
+    merged_dynamic_fixed_crosswalk = _concat_frames(frames["dynamic_fixed_crosswalk"])
+    merged_dynamic_topic_candidates = _concat_frames(frames["dynamic_topic_candidates"])
+    merged_dynamic_binary_recommendations = _concat_frames(frames["dynamic_binary_recommendations"])
     merged_bootstrap_ci = _concat_frames(frames["bootstrap_ci"])
     run_metadata_df = pd.DataFrame(state["run_metadata_rows"])
 
@@ -1006,7 +1176,14 @@ def _write_summary_workbook(args, pred_files, truth_files, report_dir: Path, sta
     group_summary_df = build_group_summaries(merged_metrics, comparability_df, run_metadata_df=run_metadata_df)
     if not group_summary_df.empty:
         validate_accuracy_bounds(group_summary_df, context="group_summary")
-    protocol_df = build_protocol_df(args, pred_files, truth_files, report_dir)
+    protocol_df = build_protocol_df(
+        args,
+        pred_files,
+        truth_files,
+        report_dir,
+        run_metadata_df=run_metadata_df,
+        decision_source_df=merged_decision_source_metrics,
+    )
     long_context_stability_df = build_long_context_stability(
         merged_metrics,
         merged_unknown_rates,
@@ -1035,6 +1212,11 @@ def _write_summary_workbook(args, pred_files, truth_files, report_dir: Path, sta
             merged_unknown_conflicts.to_excel(writer, sheet_name="Unknown Conflict Analysis", index=False)
             merged_explainability_quality.to_excel(writer, sheet_name="Explainability Quality", index=False)
             merged_evidence_balance_metrics.to_excel(writer, sheet_name="Evidence Balance Metrics", index=False)
+            merged_dynamic_topic_quality.to_excel(writer, sheet_name="Dynamic Topic Quality", index=False)
+            merged_dynamic_topic_distributions.to_excel(writer, sheet_name="Dynamic Topic Distribution", index=False)
+            merged_dynamic_fixed_crosswalk.to_excel(writer, sheet_name="Dynamic Fixed Crosswalk", index=False)
+            merged_dynamic_topic_candidates.to_excel(writer, sheet_name="Dynamic Topic Candidates", index=False)
+            merged_dynamic_binary_recommendations.to_excel(writer, sheet_name="Dynamic Binary Recommendations", index=False)
             merged_bootstrap_ci.to_excel(writer, sheet_name="Bootstrap CI", index=False)
             mcnemar_df.to_excel(writer, sheet_name="McNemar", index=False)
             merged_chunk_metrics.to_excel(writer, sheet_name="Chunk Metrics", index=False)

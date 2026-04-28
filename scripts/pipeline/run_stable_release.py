@@ -24,7 +24,9 @@ from src.runtime.project_paths import (
     ensure_run_layout,
     run_paths,
 )
+from src.runtime.config import Config
 from src.prompting.manifest import load_prompt_manifest
+from src.urban.urban_family_gate import load_family_gate_metadata
 
 DEFAULT_DATASET_ID = DEFAULT_STABLE_DATASET_ID
 STABLE_MODEL_NAME = "deepseek-v4-flash"
@@ -32,6 +34,15 @@ DEFAULT_TAG = "20260427_deepseek_v4_flash_stable"
 DEFAULT_ORDER_ID = "canonical_title_order"
 DEFAULT_MAX_SAMPLES_PER_WINDOW = 50
 EXPECTED_FULL_SAMPLE_COUNT = 1000
+STABLE_RUNTIME_FLAG_OVERRIDES = {
+    "URBAN_HYBRID_LLM_ASSIST_ENABLED": "true",
+    "URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED": "true",
+    "URBAN_FAMILY_GATE_ENABLED": "true",
+    "URBAN_ANCHOR_GUARD_ENABLED": "true",
+    "URBAN_UNCERTAIN_NONURBAN_GUARD_ENABLED": "true",
+    "URBAN_OPEN_SET_ENABLED": "true",
+    "URBAN_BINARY_RECALL_CALIBRATION_ENABLED": "true",
+}
 
 
 @dataclass(frozen=True)
@@ -182,7 +193,35 @@ def stable_child_env() -> dict[str, str]:
     env = os.environ.copy()
     env["LLM_MODEL_NAME"] = STABLE_MODEL_NAME
     env["DEEPSEEK_MODEL"] = STABLE_MODEL_NAME
+    env.update(STABLE_RUNTIME_FLAG_OVERRIDES)
     return env
+
+
+def _runtime_flag_value(raw: Any) -> bool | str:
+    if raw in {"", None}:
+        return ""
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _stable_family_gate_metadata(runtime: dict[str, Any]) -> dict[str, Any]:
+    metadata = load_family_gate_metadata()
+    return {
+        "family_gate_enabled": _runtime_flag_value(
+            runtime.get("family_gate_enabled", Config.URBAN_FAMILY_GATE_ENABLED)
+        ),
+        "online_llm_hints_enabled": _runtime_flag_value(
+            runtime.get("online_llm_hints_enabled", Config.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED)
+        ),
+        "family_gate_model_path": str(
+            runtime.get("family_gate_model_path") or Config.URBAN_FAMILY_GATE_MODEL_PATH.resolve()
+        ),
+        "family_gate_trained_at": runtime.get("family_gate_trained_at") or metadata.get("trained_at", ""),
+        "family_gate_training_sources": runtime.get("family_gate_training_sources") or metadata.get("training_sources", []),
+        "family_gate_sample_count": runtime.get("family_gate_sample_count") or metadata.get("sample_count", ""),
+        "family_gate_positive_rate": runtime.get("family_gate_positive_rate") or metadata.get("positive_rate", ""),
+    }
 
 
 def run_logged(
@@ -230,6 +269,7 @@ def collect_stable_metrics(paths: StablePaths) -> dict[str, Any]:
     pred_df = pd.read_excel(paths.prediction_file, engine="openpyxl")
     manifest = load_prompt_manifest(paths.prediction_file) or {}
     runtime = manifest.get("runtime") or {}
+    family_gate_metadata = _stable_family_gate_metadata(runtime)
     urban = _find_urban_metric(paths.eval_summary_file, file_stem)
     unknown_df = pd.read_excel(paths.eval_summary_file, sheet_name="Unknown Rate", engine="openpyxl")
     unknown_rows = unknown_df[unknown_df["File"] == file_stem]
@@ -274,6 +314,10 @@ def collect_stable_metrics(paths: StablePaths) -> dict[str, Any]:
         "explanation_coverage": float(explainability["Decision Explanation Coverage"]),
         "rule_stack_coverage": float(explainability["Rule Stack Coverage"]),
         "binary_evidence_coverage": float(explainability["Binary Evidence Coverage"]),
+        "family_gate_model_used_count": int(
+            pred_df.get("family_decision_source", pd.Series(dtype=str)).fillna("").astype(str).eq("family_gate_model").sum()
+        ),
+        **family_gate_metadata,
     }
 
 
@@ -341,6 +385,7 @@ def write_run_summary(
         "thresholds": asdict(thresholds),
         "gate_status": gate_status,
         "gate_failures": gate_failures,
+        "runtime_flag_overrides": dict(STABLE_RUNTIME_FLAG_OVERRIDES),
         "commands": {name: command_for_display(command) for name, command in commands.items()},
     }
     paths.run_summary_file.parent.mkdir(parents=True, exist_ok=True)
