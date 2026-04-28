@@ -875,6 +875,9 @@ class TaskRouter:
             Schema.SPATIAL_DESC: result.get(Schema.SPATIAL_DESC, "Not mentioned") or "Not mentioned",
             "Reasoning": result.get("Reasoning", ""),
             "Confidence": result.get("Confidence", "Low"),
+            Schema.SPATIAL_VALIDATION_STATUS: result.get(Schema.SPATIAL_VALIDATION_STATUS, ""),
+            Schema.SPATIAL_VALIDATION_REASON: result.get(Schema.SPATIAL_VALIDATION_REASON, ""),
+            Schema.SPATIAL_AREA_EVIDENCE: result.get(Schema.SPATIAL_AREA_EVIDENCE, ""),
         }
 
     def _get_urban_session_path(self, task_name: str, index: int, run_id: str) -> Path:
@@ -935,6 +938,9 @@ class TaskRouter:
                 Schema.SPATIAL_DESC,
                 "Reasoning",
                 "Confidence",
+                Schema.SPATIAL_VALIDATION_STATUS,
+                Schema.SPATIAL_VALIDATION_REASON,
+                Schema.SPATIAL_AREA_EVIDENCE,
             ]
             spatial_values = df_spatial.reset_index(drop=True)
             for column in spatial_fields:

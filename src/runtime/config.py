@@ -31,6 +31,9 @@ class Schema:
     IS_SPATIAL = "空间研究/非空间研究"
     SPATIAL_LEVEL = "空间等级"
     SPATIAL_DESC = "具体空间描述"
+    SPATIAL_VALIDATION_STATUS = "spatial_validation_status"
+    SPATIAL_VALIDATION_REASON = "spatial_validation_reason"
+    SPATIAL_AREA_EVIDENCE = "spatial_area_evidence"
     
     # All fields for consistent ordering
     FIELDS = [IS_URBAN_RENEWAL, IS_SPATIAL, SPATIAL_LEVEL, SPATIAL_DESC]

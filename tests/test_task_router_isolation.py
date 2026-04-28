@@ -431,6 +431,9 @@ def test_merge_results_writes_source_input_plus_review_columns(tmp_path):
                 Schema.SPATIAL_DESC: OLD_CITY_AREA,
                 "Reasoning": "mentions district scale",
                 "Confidence": "High",
+                Schema.SPATIAL_VALIDATION_STATUS: "accepted",
+                Schema.SPATIAL_VALIDATION_REASON: "explicit_area_evidence",
+                Schema.SPATIAL_AREA_EVIDENCE: OLD_CITY_AREA,
             }
         ]
     ).to_excel(spatial_path, index=False, engine="openpyxl")
@@ -456,6 +459,9 @@ def test_merge_results_writes_source_input_plus_review_columns(tmp_path):
     assert merged.at[0, "topic_final_name_en"] == topic_name_for_label("U10")
     assert merged.at[0, "topic_final_name_zh"] == topic_name_zh_for_label("U10")
     assert merged.at[0, REVIEW_DERIVED_COLUMNS[8]] == "mentions district scale"
+    assert merged.at[0, Schema.SPATIAL_VALIDATION_STATUS] == "accepted"
+    assert merged.at[0, Schema.SPATIAL_VALIDATION_REASON] == "explicit_area_evidence"
+    assert merged.at[0, Schema.SPATIAL_AREA_EVIDENCE] == OLD_CITY_AREA
 
 
 def test_merge_results_uses_row_order_for_duplicate_titles(tmp_path):

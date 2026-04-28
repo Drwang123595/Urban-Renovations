@@ -16,6 +16,9 @@ REVIEW_PREDICT_SPATIAL_DESC_COLUMN = "\u9884\u6d4b_\u5177\u4f53\u7a7a\u95f4\u63c
 REVIEW_URBAN_CONFIDENCE_COLUMN = "\u57ce\u5e02\u66f4\u65b0\u5224\u5b9a\u7f6e\u4fe1\u5ea6(confidence)"
 REVIEW_REASONING_COLUMN = "\u7a7a\u95f4\u63d0\u53d6\u4f9d\u636e(Reasoning)"
 REVIEW_SPATIAL_CONFIDENCE_COLUMN = "\u7a7a\u95f4\u63d0\u53d6\u7f6e\u4fe1\u5ea6(Confidence)"
+REVIEW_SPATIAL_VALIDATION_STATUS_COLUMN = "spatial_validation_status"
+REVIEW_SPATIAL_VALIDATION_REASON_COLUMN = "spatial_validation_reason"
+REVIEW_SPATIAL_AREA_EVIDENCE_COLUMN = "spatial_area_evidence"
 REVIEW_DECISION_EXPLANATION_COLUMN = "\u57ce\u5e02\u66f4\u65b0\u5224\u5b9a\u8bf4\u660e(decision_explanation)"
 REVIEW_POSITIVE_EVIDENCE_COLUMN = "\u4e3b\u8981\u652f\u6301\u8bc1\u636e(primary_positive_evidence)"
 REVIEW_NEGATIVE_EVIDENCE_COLUMN = "\u4e3b\u8981\u6392\u9664\u8bc1\u636e(primary_negative_evidence)"
@@ -59,6 +62,9 @@ REVIEW_DERIVED_COLUMNS = [
     REVIEW_URBAN_CONFIDENCE_COLUMN,
     REVIEW_REASONING_COLUMN,
     REVIEW_SPATIAL_CONFIDENCE_COLUMN,
+    REVIEW_SPATIAL_VALIDATION_STATUS_COLUMN,
+    REVIEW_SPATIAL_VALIDATION_REASON_COLUMN,
+    REVIEW_SPATIAL_AREA_EVIDENCE_COLUMN,
     "review_flag",
     "review_reason",
     REVIEW_DECISION_EXPLANATION_COLUMN,
@@ -219,6 +225,18 @@ def build_review_ready_merged_frame(
     derived[REVIEW_URBAN_CONFIDENCE_COLUMN] = _select_series(working, ["confidence"])
     derived[REVIEW_REASONING_COLUMN] = _select_series(working, ["Reasoning", "Reasoning_spatial"])
     derived[REVIEW_SPATIAL_CONFIDENCE_COLUMN] = _select_series(working, ["Confidence", "Confidence_spatial"])
+    derived[REVIEW_SPATIAL_VALIDATION_STATUS_COLUMN] = _select_series(
+        working,
+        [Schema.SPATIAL_VALIDATION_STATUS, f"{Schema.SPATIAL_VALIDATION_STATUS}_spatial"],
+    )
+    derived[REVIEW_SPATIAL_VALIDATION_REASON_COLUMN] = _select_series(
+        working,
+        [Schema.SPATIAL_VALIDATION_REASON, f"{Schema.SPATIAL_VALIDATION_REASON}_spatial"],
+    )
+    derived[REVIEW_SPATIAL_AREA_EVIDENCE_COLUMN] = _select_series(
+        working,
+        [Schema.SPATIAL_AREA_EVIDENCE, f"{Schema.SPATIAL_AREA_EVIDENCE}_spatial"],
+    )
     derived["review_flag"] = _select_series(working, ["review_flag"])
     derived["review_reason"] = _select_series(working, ["review_reason"])
     derived[REVIEW_DECISION_EXPLANATION_COLUMN] = _select_series(working, ["decision_explanation"])

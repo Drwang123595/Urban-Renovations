@@ -311,18 +311,25 @@ class DataProcessor:
             df_stepwise["_key"] = df_stepwise[key_col].astype(str).str.strip().str.lower()
             df_spatial["_key"] = df_spatial[key_col].astype(str).str.strip().str.lower()
 
+            spatial_columns = [
+                "_key",
+                Schema.IS_SPATIAL,
+                Schema.SPATIAL_LEVEL,
+                Schema.SPATIAL_DESC,
+                "Reasoning",
+                "Confidence",
+            ]
+            for column in [
+                Schema.SPATIAL_VALIDATION_STATUS,
+                Schema.SPATIAL_VALIDATION_REASON,
+                Schema.SPATIAL_AREA_EVIDENCE,
+            ]:
+                if column in df_spatial.columns:
+                    spatial_columns.append(column)
+
             merged = pd.merge(
                 df_stepwise,
-                df_spatial[
-                    [
-                        "_key",
-                        Schema.IS_SPATIAL,
-                        Schema.SPATIAL_LEVEL,
-                        Schema.SPATIAL_DESC,
-                        "Reasoning",
-                        "Confidence",
-                    ]
-                ],
+                df_spatial[spatial_columns],
                 on="_key",
                 suffixes=("", "_spatial"),
                 how="left"

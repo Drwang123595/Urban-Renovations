@@ -209,7 +209,18 @@ def test_build_output_rows_do_not_leak_input_labels():
             "Confidence": "High",
         },
     )
-    assert list(spatial_row.keys()) == ["Article Title", "Abstract", "空间研究/非空间研究", "空间等级", "具体空间描述", "Reasoning", "Confidence"]
+    assert list(spatial_row.keys()) == [
+        "Article Title",
+        "Abstract",
+        "空间研究/非空间研究",
+        "空间等级",
+        "具体空间描述",
+        "Reasoning",
+        "Confidence",
+        Schema.SPATIAL_VALIDATION_STATUS,
+        Schema.SPATIAL_VALIDATION_REASON,
+        Schema.SPATIAL_AREA_EVIDENCE,
+    ]
 
 
 def test_build_urban_output_row_keeps_anchor_guard_audit_fields():
