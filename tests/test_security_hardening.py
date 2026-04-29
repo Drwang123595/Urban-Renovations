@@ -530,3 +530,34 @@ def test_spatial_parser_rejects_implicit_country_with_city_scale():
     assert result[Schema.IS_SPATIAL] == "0"
     assert result[Schema.SPATIAL_VALIDATION_STATUS] == "rejected"
     assert result[Schema.SPATIAL_VALIDATION_REASON] == "scale_area_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("title", "area"),
+    [
+        (
+            "The Evolution and Adaptive Governance of the 22@Innovation District in Barcelona",
+            "the 22@ Innovation District in Barcelona",
+        ),
+        (
+            "The urban heat island in the city of Poznan as derived from Landsat 5 TM",
+            "the city of Poznań (Poland)",
+        ),
+    ],
+)
+def test_spatial_parser_accepts_source_supported_area_variants(title, area):
+    strategy = SpatialExtractionStrategy.__new__(SpatialExtractionStrategy)
+    response = json.dumps(
+        {
+            "Reasoning": "The target study area is explicitly named with minor formatting variation.",
+            "Is_Spatial_Research": True,
+            "Spatial_Scale_Level": "7. Single-city / Municipal Scale",
+            "Specific_Study_Area": area,
+            "Confidence": "High",
+        }
+    )
+
+    result = strategy.parse_json_output(response, title=title, abstract="")
+
+    assert result[Schema.IS_SPATIAL] == "1"
+    assert result[Schema.SPATIAL_VALIDATION_STATUS] == "accepted"

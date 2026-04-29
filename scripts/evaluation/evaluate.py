@@ -42,6 +42,7 @@ from src.prompting.manifest import (
     manifest_path_for_output,
 )
 from src.runtime.config import Config, Schema
+from src.reporting.metric_name_catalog import metric_dictionary_frame, rename_columns_for_display
 from src.urban.urban_family_gate import load_family_gate_metadata
 from src.urban.urban_training_contract import allowed_training_workbooks, assert_training_source_contract
 
@@ -470,6 +471,8 @@ def evaluate_one_file(
     with pd.ExcelWriter(report_path, engine="openpyxl") as writer:
         detail_df.to_excel(writer, sheet_name="Detail Comparison", index=False)
         metrics_df.to_excel(writer, sheet_name="Quality Metrics", index=False)
+        rename_columns_for_display(metrics_df).to_excel(writer, sheet_name="Clean Metrics", index=False)
+        metric_dictionary_frame().to_excel(writer, sheet_name="Metric Dictionary", index=False)
         theme_metrics_df.to_excel(writer, sheet_name="Theme Metrics", index=False)
         theme_confusion_df.to_excel(writer, sheet_name="Theme Confusion", index=False)
         theme_family_df.to_excel(writer, sheet_name="U-N Family Metrics", index=False)
@@ -1358,6 +1361,8 @@ def _write_summary_workbook(args, pred_files, truth_files, report_dir: Path, sta
         summary_path = report_dir / "Eval_Summary.xlsx"
         with pd.ExcelWriter(summary_path, engine="openpyxl") as writer:
             merged_metrics.to_excel(writer, sheet_name="All Metrics", index=False)
+            rename_columns_for_display(merged_metrics).to_excel(writer, sheet_name="Clean Metrics", index=False)
+            metric_dictionary_frame().to_excel(writer, sheet_name="Metric Dictionary", index=False)
             run_metadata_df.to_excel(writer, sheet_name="Run Metadata", index=False)
             protocol_df.to_excel(writer, sheet_name="Protocol", index=False)
             if not summary_df.empty:

@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, Union
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .merged_output import build_review_ready_merged_frame, load_task_input_frame
+from .merged_output import build_metric_dictionary_frame, build_review_ready_merged_frame, load_task_input_frame
 from ..prompting.generator import PromptGenerator
 from ..runtime.config import Config, Schema
 from ..runtime.llm_client import DeepSeekClient
@@ -998,6 +998,7 @@ class TaskRouter:
                 input_df = load_task_input_frame(parent)
                 if input_df is not None:
                     break
+            merged_raw = merged.copy()
             merged = build_review_ready_merged_frame(merged, input_df=input_df)
 
             if output_file:
@@ -1005,7 +1006,10 @@ class TaskRouter:
             else:
                 merge_output = urban_path.parent / f"merged_{timestamp}.xlsx"
             self._ensure_output_parent(merge_output)
-            merged.to_excel(merge_output, index=False, engine="openpyxl")
+            with pd.ExcelWriter(merge_output, engine="openpyxl") as writer:
+                merged.to_excel(writer, sheet_name="Review View", index=False)
+                build_metric_dictionary_frame().to_excel(writer, sheet_name="Metric Dictionary", index=False)
+                merged_raw.to_excel(writer, sheet_name="Raw Predictions", index=False)
             print(f"[INFO] Merged results saved to: {merge_output}")
             return merge_output
 

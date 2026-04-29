@@ -8,6 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from src.config import Schema
 from src.merged_output import (
     REVIEW_BINARY_EVIDENCE_COLUMN,
+    REVIEW_BINARY_POLICY_ACTION_COLUMN,
     REVIEW_DERIVED_COLUMNS,
     REVIEW_DECISION_EXPLANATION_COLUMN,
     REVIEW_DYNAMIC_BINARY_ACTION_COLUMN,
@@ -25,9 +26,22 @@ from src.merged_output import (
     REVIEW_DYNAMIC_TOPIC_SOURCE_POOL_COLUMN,
     REVIEW_EVIDENCE_BALANCE_COLUMN,
     REVIEW_INPUT_COLUMNS,
+    REVIEW_LLM_USED_COLUMN,
     REVIEW_NEGATIVE_EVIDENCE_COLUMN,
+    REVIEW_PREDICT_SPATIAL_COLUMN,
+    REVIEW_PREDICT_SPATIAL_DESC_COLUMN,
+    REVIEW_PREDICT_SPATIAL_LEVEL_COLUMN,
     REVIEW_POSITIVE_EVIDENCE_COLUMN,
+    REVIEW_REASONING_COLUMN,
     REVIEW_RULE_STACK_COLUMN,
+    REVIEW_SPATIAL_CONFIDENCE_COLUMN,
+    REVIEW_SPATIAL_AREA_EVIDENCE_COLUMN,
+    REVIEW_SPATIAL_VALIDATION_REASON_COLUMN,
+    REVIEW_SPATIAL_VALIDATION_STATUS_COLUMN,
+    REVIEW_TAXONOMY_COVERAGE_COLUMN,
+    REVIEW_TOPIC_FINAL_NAME_EN_COLUMN,
+    REVIEW_TOPIC_FINAL_NAME_ZH_COLUMN,
+    REVIEW_URBAN_CONFIDENCE_COLUMN,
     REVIEW_UNKNOWN_RECOVERY_EVIDENCE_COLUMN,
     REVIEW_UNKNOWN_RECOVERY_PATH_COLUMN,
     build_review_ready_merged_frame,
@@ -307,6 +321,9 @@ def test_build_review_ready_merged_frame_preserves_source_input_columns():
                 "Confidence": "High",
                 "review_flag": 0,
                 "review_reason": "",
+                "taxonomy_coverage_status": "covered",
+                "binary_policy_action": "accept_positive",
+                "llm_used": 0,
                 "decision_explanation": "final=1; score=0.9300>=threshold=0.4500",
                 "primary_positive_evidence": "topic_final=U10",
                 "primary_negative_evidence": "none",
@@ -341,13 +358,14 @@ def test_build_review_ready_merged_frame_preserves_source_input_columns():
     assert "review_status" not in review.columns
     assert review.at[0, Schema.IS_URBAN_RENEWAL] == "1"
     assert review.at[0, "Publication Year"] == 2024
-    assert review.at[0, REVIEW_DERIVED_COLUMNS[1]] == SPATIAL_STUDY
-    assert review.at[0, REVIEW_DERIVED_COLUMNS[2]] == DISTRICT_LEVEL
-    assert review.at[0, REVIEW_DERIVED_COLUMNS[3]] == OLD_CITY_AREA
-    assert review.at[0, "topic_final_name_en"] == topic_name_for_label("U10")
-    assert review.at[0, "topic_final_name_zh"] == topic_name_zh_for_label("U10")
-    assert review.at[0, REVIEW_DERIVED_COLUMNS[7]] == 0.93
-    assert review.at[0, REVIEW_DERIVED_COLUMNS[9]] == "High"
+    assert review.at[0, REVIEW_PREDICT_SPATIAL_COLUMN] == SPATIAL_STUDY
+    assert review.at[0, REVIEW_PREDICT_SPATIAL_LEVEL_COLUMN] == DISTRICT_LEVEL
+    assert review.at[0, REVIEW_PREDICT_SPATIAL_DESC_COLUMN] == OLD_CITY_AREA
+    assert review.at[0, REVIEW_TOPIC_FINAL_NAME_EN_COLUMN] == topic_name_for_label("U10")
+    assert review.at[0, REVIEW_TOPIC_FINAL_NAME_ZH_COLUMN] == topic_name_zh_for_label("U10")
+    assert review.at[0, REVIEW_TAXONOMY_COVERAGE_COLUMN] == "covered"
+    assert review.at[0, REVIEW_URBAN_CONFIDENCE_COLUMN] == 0.93
+    assert review.at[0, REVIEW_SPATIAL_CONFIDENCE_COLUMN] == "High"
     assert review.at[0, REVIEW_DECISION_EXPLANATION_COLUMN].startswith("final=1")
     assert review.at[0, REVIEW_POSITIVE_EVIDENCE_COLUMN] == "topic_final=U10"
     assert review.at[0, REVIEW_NEGATIVE_EVIDENCE_COLUMN] == "none"
@@ -369,6 +387,8 @@ def test_build_review_ready_merged_frame_preserves_source_input_columns():
     assert review.at[0, REVIEW_DYNAMIC_BINARY_ACTION_COLUMN] == "supports_current_label"
     assert review.at[0, REVIEW_DYNAMIC_BINARY_REASON_COLUMN] == "dynamic_topic=DUR_0001"
     assert review.at[0, REVIEW_DYNAMIC_BINARY_PRIORITY_COLUMN] == "low"
+    assert review.at[0, REVIEW_BINARY_POLICY_ACTION_COLUMN] == "accept_positive"
+    assert review.at[0, REVIEW_LLM_USED_COLUMN] == 0
 
 
 def test_topic_name_zh_for_label_covers_nonurban_and_unknown():
@@ -451,17 +471,22 @@ def test_merge_results_writes_source_input_plus_review_columns(tmp_path):
 
     merged = pd.read_excel(merged_path, engine="openpyxl")
     assert merged.columns.tolist() == REVIEW_INPUT_COLUMNS + REVIEW_DERIVED_COLUMNS
+    assert set(pd.ExcelFile(merged_path, engine="openpyxl").sheet_names) == {
+        "Review View",
+        "Metric Dictionary",
+        "Raw Predictions",
+    }
     assert merged.at[0, "Publication Year"] == 2024
     assert "theme_gold" not in merged.columns
     assert "theme_gold_source" not in merged.columns
     assert "review_status" not in merged.columns
-    assert merged.at[0, REVIEW_DERIVED_COLUMNS[1]] == SPATIAL_STUDY
-    assert merged.at[0, "topic_final_name_en"] == topic_name_for_label("U10")
-    assert merged.at[0, "topic_final_name_zh"] == topic_name_zh_for_label("U10")
-    assert merged.at[0, REVIEW_DERIVED_COLUMNS[8]] == "mentions district scale"
-    assert merged.at[0, Schema.SPATIAL_VALIDATION_STATUS] == "accepted"
-    assert merged.at[0, Schema.SPATIAL_VALIDATION_REASON] == "explicit_area_evidence"
-    assert merged.at[0, Schema.SPATIAL_AREA_EVIDENCE] == OLD_CITY_AREA
+    assert merged.at[0, REVIEW_PREDICT_SPATIAL_COLUMN] == SPATIAL_STUDY
+    assert merged.at[0, REVIEW_TOPIC_FINAL_NAME_EN_COLUMN] == topic_name_for_label("U10")
+    assert merged.at[0, REVIEW_TOPIC_FINAL_NAME_ZH_COLUMN] == topic_name_zh_for_label("U10")
+    assert merged.at[0, REVIEW_REASONING_COLUMN] == "mentions district scale"
+    assert merged.at[0, REVIEW_SPATIAL_VALIDATION_STATUS_COLUMN] == "accepted"
+    assert merged.at[0, REVIEW_SPATIAL_VALIDATION_REASON_COLUMN] == "explicit_area_evidence"
+    assert merged.at[0, REVIEW_SPATIAL_AREA_EVIDENCE_COLUMN] == OLD_CITY_AREA
 
 
 def test_merge_results_uses_row_order_for_duplicate_titles(tmp_path):
@@ -523,8 +548,8 @@ def test_merge_results_uses_row_order_for_duplicate_titles(tmp_path):
     assert result == merged_path
     merged = pd.read_excel(merged_path, engine="openpyxl")
     assert len(merged) == 2
-    assert merged[REVIEW_DERIVED_COLUMNS[3]].tolist() == ["First City", "Second District"]
-    assert merged[REVIEW_DERIVED_COLUMNS[8]].tolist() == [
+    assert merged[REVIEW_PREDICT_SPATIAL_DESC_COLUMN].tolist() == ["First City", "Second District"]
+    assert merged[REVIEW_REASONING_COLUMN].tolist() == [
         "first row spatial reasoning",
         "second row spatial reasoning",
     ]

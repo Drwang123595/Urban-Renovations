@@ -374,6 +374,8 @@ def test_evaluate_one_file_writes_guardrail_sheets(tmp_path):
     assert workbook.sheet_names == [
         "Detail Comparison",
         "Quality Metrics",
+        "Clean Metrics",
+        "Metric Dictionary",
         "Theme Metrics",
         "Theme Confusion",
         "U-N Family Metrics",

@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 from typing import Dict, Any, Optional, Union, Tuple
 from pathlib import Path
 from .base import ExtractionStrategy
@@ -101,7 +102,6 @@ class SpatialExtractionStrategy(ExtractionStrategy):
         "united states": ("united states", "u.s.", "american", "federal"),
         "china": ("china", "chinese", "prc"),
         "european union": ("european union", "e.u.", "eu", "european commission", "european"),
-        "hong kong": ("hong kong", "hksar"),
     }
     _IMPLICIT_POLICY_TERMS = re.compile(
         r"\b(government|ministry|department|agency|authority|commission|policy|"
@@ -235,9 +235,26 @@ class SpatialExtractionStrategy(ExtractionStrategy):
 
     def _normalize_for_match(self, value: Any) -> str:
         text = "" if value is None else str(value)
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        text = re.sub(r"[\u2010-\u2015\u2212]", "-", text)
         text = re.sub(r"[\u2018\u2019\u201c\u201d]", "'", text)
         text = re.sub(r"\s+", " ", text)
         return text.strip().lower()
+
+    def _compact_for_match(self, value: Any) -> str:
+        return re.sub(r"[^a-z0-9]+", "", self._normalize_for_match(value))
+
+    def _source_contains_phrase(self, source: str, phrase: str) -> bool:
+        normalized_phrase = self._normalize_for_match(phrase).strip(" .;:,")
+        if not normalized_phrase:
+            return False
+        if normalized_phrase in source:
+            return True
+        compact_phrase = self._compact_for_match(phrase)
+        if len(compact_phrase) < 4:
+            return False
+        return compact_phrase in self._compact_for_match(source)
 
     def _strip_implicit_suffix(self, value: str) -> str:
         text = re.sub(r"\([^)]*\bimplicit\b[^)]*\)", "", value, flags=re.IGNORECASE)
@@ -303,9 +320,17 @@ class SpatialExtractionStrategy(ExtractionStrategy):
 
     def _area_fragments(self, area: str) -> list[str]:
         core = self._strip_implicit_suffix(area)
+        core = re.sub(r"\([^)]*\)", ",", core)
         core = re.sub(r"\b(?:in|within|of)\b", ",", core, flags=re.IGNORECASE)
         fragments = re.split(r"\s*(?:,|;|/|&|\band\b)\s*", core, flags=re.IGNORECASE)
         return [fragment.strip(" .;:,") for fragment in fragments if fragment.strip(" .;:,")]
+
+    def _area_primary_anchor(self, area: str) -> str:
+        core = self._strip_implicit_suffix(area)
+        core = re.sub(r"\([^)]*\)", "", core).strip(" .;:,")
+        core = re.sub(r"'s\b", "", core, flags=re.IGNORECASE)
+        core = re.sub(r"\bmetropolitan area\b", "", core, flags=re.IGNORECASE)
+        return re.sub(r"\s+", " ", core).strip(" .;:,")
 
     def _source_supports_implicit_country(
         self,
@@ -337,11 +362,16 @@ class SpatialExtractionStrategy(ExtractionStrategy):
         source = self._normalize_for_match(source_text)
         core_area = self._strip_implicit_suffix(str(area))
         area_norm = self._normalize_for_match(core_area).strip(" .;:,")
-        if area_norm and area_norm in source:
+        if area_norm and self._source_contains_phrase(source, area_norm):
             return True, "explicit_area_evidence", core_area
 
+        primary_anchor = self._area_primary_anchor(core_area)
+        primary_norm = self._normalize_for_match(primary_anchor).strip(" .;:,")
+        if primary_norm and self._source_contains_phrase(source, primary_norm):
+            return True, "explicit_area_primary_anchor_evidence", primary_anchor
+
         fragments = self._area_fragments(core_area)
-        if len(fragments) >= 2 and all(self._normalize_for_match(fragment) in source for fragment in fragments):
+        if len(fragments) >= 2 and all(self._source_contains_phrase(source, fragment) for fragment in fragments):
             return True, "explicit_area_fragment_evidence", "; ".join(fragments)
 
         if "implicit" in self._normalize_for_match(str(area)):
