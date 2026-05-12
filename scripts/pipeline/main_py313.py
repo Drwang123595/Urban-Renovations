@@ -350,6 +350,26 @@ def select_urban_method(default_method: UrbanMethod = UrbanMethod.THREE_STAGE_HY
             print(exc)
 
 
+def select_hybrid_llm_assist(default_enabled: bool = True) -> bool:
+    print("\nSelect hybrid LLM assist:")
+    print("1 = on")
+    print("2 = off")
+    print(f"Current preset: {'on' if default_enabled else 'off'}")
+
+    while True:
+        choice = input("Enter choice (1/2/on/off, press Enter to keep preset): ").strip()
+        if not choice:
+            return bool(default_enabled)
+        if choice == "1":
+            return True
+        if choice == "2":
+            return False
+        try:
+            return normalize_hybrid_llm_assist(choice)
+        except ValueError as exc:
+            print(exc)
+
+
 def select_output_mode(task: TaskType, preset_output: str = None):
     print("\nSelect output mode:")
     print("1 = auto output path")
@@ -943,16 +963,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_args():
-    return build_argument_parser().parse_args()
+def parse_args(argv: list[str] | None = None):
+    return build_argument_parser().parse_args(argv)
 
 
 def prepare_experiment_args(args) -> None:
     preset_input = args.input or default_train_input()
     explicit_track = args.experiment_track
     args.experiment_track = infer_experiment_track(explicit_track, preset_input)
-    auto_train_track = explicit_track is None and is_train_scoped_input(preset_input)
-    if not args.non_interactive and not auto_train_track:
+    if not args.non_interactive and explicit_track is None:
         args.experiment_track = select_experiment_track(default_track=args.experiment_track)
     args.order_id = normalize_order_id(args.order_id)
     if args.max_samples_per_window <= 0:
@@ -978,7 +997,12 @@ def load_selectable_modes(strategy_registry: PromptStrategyRegistry, args) -> tu
 
 
 def choose_task_mode(args) -> None:
-    default_task = TaskType(args.task) if args.task else TaskType.BOTH
+    if args.task:
+        default_task = TaskType(args.task)
+    elif args.experiment_track == "stable_release":
+        default_task = TaskType.URBAN_RENEWAL
+    else:
+        default_task = TaskType.BOTH
     args.task = default_task if args.non_interactive else select_task_mode(default_task=default_task)
 
 
@@ -1003,7 +1027,21 @@ def configure_urban_runtime(args) -> None:
     else:
         args.urban_method = default_urban_method
 
-    args.hybrid_llm_assist = resolve_hybrid_llm_assist(args.hybrid_llm_assist)
+    explicit_hybrid_llm_assist = args.hybrid_llm_assist
+    default_hybrid_llm_assist = (
+        True
+        if args.experiment_track == "stable_release" and explicit_hybrid_llm_assist is None
+        else resolve_hybrid_llm_assist(explicit_hybrid_llm_assist)
+    )
+    if (
+        args.task in {TaskType.URBAN_RENEWAL, TaskType.BOTH}
+        and args.urban_method == UrbanMethod.THREE_STAGE_HYBRID
+        and not args.non_interactive
+        and explicit_hybrid_llm_assist is None
+    ):
+        args.hybrid_llm_assist = select_hybrid_llm_assist(default_enabled=default_hybrid_llm_assist)
+    else:
+        args.hybrid_llm_assist = default_hybrid_llm_assist
 
     if not args.non_interactive and args.experiment_track == "stable_release":
         if args.urban_method != UrbanMethod.THREE_STAGE_HYBRID or not args.hybrid_llm_assist:
@@ -1159,23 +1197,28 @@ def build_task_router(args, urban_definition, spatial_definition) -> TaskRouter:
     )
 
 
-def main():
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     Config.load_env()
-    Config.validate_runtime_environment(require_py313=True, warn_on_minor_drift=True)
+
+    try:
+        Config.validate_runtime_environment(require_py313=True, warn_on_minor_drift=True)
+    except RuntimeError as exc:
+        print(f"Error: {exc}")
+        return 1
 
     try:
         strategy_registry = load_prompt_strategy_registry()
     except Exception as exc:
         print(f"Error: failed to load strategy registry: {exc}")
-        return
+        return 1
 
-    args = parse_args()
     prepare_experiment_args(args)
     try:
         urban_enabled, spatial_enabled = load_selectable_modes(strategy_registry, args)
     except ValueError as exc:
         print(f"Error: {exc}")
-        return
+        return 1
 
     print_startup_overview(urban_enabled, spatial_enabled)
 
@@ -1189,11 +1232,11 @@ def main():
         )
     except ValueError as exc:
         print(f"Error: {exc}")
-        return
+        return 1
 
     input_path = select_run_input(args)
     if input_path is None:
-        return
+        return 1
 
     dataset_id, truth_file, session_policy, run_context = build_execution_context(args, input_path)
     finalize_output_args(args)
@@ -1225,7 +1268,8 @@ def main():
 
     print(f"{'=' * 60}")
     print("Done.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

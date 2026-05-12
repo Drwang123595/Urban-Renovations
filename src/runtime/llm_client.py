@@ -1,7 +1,7 @@
 import os
 import re
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 try:
     from openai import OpenAI, APIError, RateLimitError
@@ -25,6 +25,7 @@ class DeepSeekClient:
         self.api_key = api_key or Config.API_KEY
         self.base_url = base_url or Config.BASE_URL
         self.model = model or Config.MODEL_NAME
+        self.api_mode, sdk_base_url = self._resolve_api_mode_and_base_url(self.base_url)
         
         if not self.api_key:
             print("Warning: API Key is not set. API calls will fail.")
@@ -33,9 +34,15 @@ class DeepSeekClient:
         if OpenAI is not None:
             self.client = OpenAI(
                 api_key=self.api_key,
-                base_url=self.base_url,
+                base_url=sdk_base_url,
                 timeout=Config.TIMEOUT
             )
+
+    def _resolve_api_mode_and_base_url(self, base_url: str) -> Tuple[str, str]:
+        normalized = (base_url or "").rstrip("/")
+        if normalized.lower().endswith("/responses"):
+            return "responses", normalized.rsplit("/", 1)[0]
+        return "chat_completions", base_url
 
     def _mask_secret(self, value: str) -> str:
         if not value:
@@ -121,6 +128,55 @@ class DeepSeekClient:
         elif status_code == 429:
             kind = "RATE_LIMIT_429"
         print(f"API Error Kind | {kind}")
+
+    def _messages_to_responses_payload(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        instructions = []
+        input_messages = []
+        for message in messages:
+            role = message.get("role", "user")
+            content = message.get("content", "")
+            if role in {"system", "developer"}:
+                instructions.append(content)
+            elif role in {"user", "assistant"}:
+                input_messages.append({"role": role, "content": content})
+            else:
+                input_messages.append({"role": "user", "content": f"{role}: {content}"})
+
+        payload: Dict[str, Any] = {
+            "input": input_messages if input_messages else "",
+        }
+        if instructions:
+            payload["instructions"] = "\n\n".join(instructions)
+        return payload
+
+    def _extract_responses_text(self, response: Any) -> str:
+        output_text = getattr(response, "output_text", None)
+        if output_text:
+            return output_text
+
+        parts = []
+        for item in getattr(response, "output", []) or []:
+            content_items = getattr(item, "content", None)
+            if isinstance(item, dict):
+                content_items = item.get("content", content_items)
+            for content_item in content_items or []:
+                text = getattr(content_item, "text", None)
+                if isinstance(content_item, dict):
+                    text = content_item.get("text", text)
+                if text:
+                    parts.append(str(text))
+        return "\n".join(parts)
+
+    def _responses_completion(self, messages: List[Dict[str, str]], temperature: float):
+        payload = self._messages_to_responses_payload(messages)
+        response = self.client.responses.create(
+            model=self.model,
+            temperature=temperature,
+            max_output_tokens=Config.MAX_TOKENS,
+            stream=False,
+            **payload,
+        )
+        return self._extract_responses_text(response)
             
     def chat_completion(self, messages: List[Dict[str, str]], temperature: float = 0.1, max_retries: int = 3) -> Optional[str]:
         """
@@ -133,6 +189,9 @@ class DeepSeekClient:
             )
         for attempt in range(max_retries):
             try:
+                if self.api_mode == "responses":
+                    return self._responses_completion(messages, temperature)
+
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
@@ -140,9 +199,8 @@ class DeepSeekClient:
                     max_tokens=Config.MAX_TOKENS,
                     stream=False
                 )
-                
-                content = response.choices[0].message.content
-                return content
+
+                return response.choices[0].message.content
                 
             except RateLimitError as e:
                 print(f"Rate Limit Hit (Attempt {attempt+1}/{max_retries}): {e}")

@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -283,6 +284,38 @@ def test_llm_client_diagnostics_do_not_log_sensitive_values_by_default(monkeypat
     assert "proxy.internal" not in output
     assert "API Error Payload" not in output
     assert "request_id=req_123" in output
+
+
+def test_llm_client_uses_responses_endpoint_when_base_url_targets_responses(monkeypatch):
+    monkeypatch.setattr(Config, "MAX_TOKENS", 123)
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(output_text="OK")
+
+    client = DeepSeekClient(
+        api_key="sk-test-secret",
+        base_url="https://api.freemodel.dev/v1/responses",
+        model="gpt-5.5",
+    )
+    client.client = SimpleNamespace(responses=SimpleNamespace(create=fake_create))
+
+    result = client.chat_completion(
+        [
+            {"role": "system", "content": "system rules"},
+            {"role": "user", "content": "Reply with OK only."},
+        ],
+        temperature=0.0,
+        max_retries=1,
+    )
+
+    assert result == "OK"
+    assert client.api_mode == "responses"
+    assert captured["model"] == "gpt-5.5"
+    assert captured["instructions"] == "system rules"
+    assert captured["input"] == [{"role": "user", "content": "Reply with OK only."}]
+    assert captured["max_output_tokens"] == 123
 
 
 def test_debug_probe_snapshot_hides_proxy_values(monkeypatch):

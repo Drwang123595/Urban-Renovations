@@ -51,6 +51,9 @@ evaluate_1000_results.json
 evaluate_1000_log.txt
 *.tmp
 *.temp
+~$*.docx
+~$*.xlsx
+~$*.pptx
 
 # Runtime artifacts
 /history/

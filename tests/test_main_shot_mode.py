@@ -1,16 +1,22 @@
 import sys
+import subprocess
 from pathlib import Path
 
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
+import scripts.main as main_module
 from scripts.main import (
+    build_argument_parser,
+    choose_task_mode,
     get_enabled_shot_modes,
     normalize_hybrid_llm_assist,
     normalize_shot_mode,
     normalize_urban_method,
+    prepare_experiment_args,
     resolve_hybrid_llm_assist,
+    select_hybrid_llm_assist,
     select_output_mode,
     select_shot_mode,
     select_task_mode,
@@ -265,7 +271,63 @@ def test_select_urban_method_uses_default_on_enter(monkeypatch):
     assert select_urban_method(default_method=UrbanMethod.PURE_LLM_API) == UrbanMethod.PURE_LLM_API
 
 
+def test_select_hybrid_llm_assist_uses_default_on_enter(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: "")
+    assert select_hybrid_llm_assist(default_enabled=False) is False
+
+
 def test_select_output_mode_custom_path(monkeypatch):
     answers = iter(["2", "custom_out.xlsx"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
     assert select_output_mode(task=TaskType.BOTH, preset_output=None) == "custom_out.xlsx"
+
+
+def test_prepare_experiment_args_prompts_for_default_research_track(monkeypatch):
+    args = build_argument_parser().parse_args([])
+    called_defaults = []
+    monkeypatch.setattr(main_module, "default_train_input", lambda: str(Config.TRAIN_DIR / "sample.xlsx"))
+    monkeypatch.setattr(main_module, "is_train_scoped_input", lambda _: True)
+    monkeypatch.setattr(
+        main_module,
+        "select_experiment_track",
+        lambda default_track: called_defaults.append(default_track) or "stable_release",
+    )
+
+    prepare_experiment_args(args)
+
+    assert called_defaults == ["research_matrix"]
+    assert args.experiment_track == "stable_release"
+
+
+def test_prepare_experiment_args_respects_explicit_track(monkeypatch):
+    args = build_argument_parser().parse_args(["--experiment-track", "legacy_archive"])
+    monkeypatch.setattr(main_module, "select_experiment_track", lambda _: pytest.fail("should not prompt"))
+
+    prepare_experiment_args(args)
+
+    assert args.experiment_track == "legacy_archive"
+
+
+def test_choose_task_mode_defaults_stable_release_to_urban(monkeypatch):
+    args = build_argument_parser().parse_args([])
+    args.experiment_track = "stable_release"
+    monkeypatch.setattr("builtins.input", lambda _: "")
+
+    choose_task_mode(args)
+
+    assert args.task == TaskType.URBAN_RENEWAL
+
+
+def test_script_main_help_is_available_from_root_entrypoint():
+    project_root = Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        [sys.executable, str(project_root / "scripts" / "main.py"), "--help"],
+        cwd=project_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--urban-shot" in result.stdout
+    assert "legacy compatibility wrapper" not in result.stdout
