@@ -220,6 +220,16 @@ def test_build_output_rows_do_not_leak_input_labels():
         Schema.SPATIAL_VALIDATION_STATUS,
         Schema.SPATIAL_VALIDATION_REASON,
         Schema.SPATIAL_AREA_EVIDENCE,
+        Schema.LLM_SPATIAL_SCALE_LEVEL_RAW,
+        Schema.RESOLVED_STUDY_AREA,
+        Schema.RESOLVED_GEO_ID,
+        Schema.AREA_HIERARCHY_PATH,
+        Schema.MAPPED_SPATIAL_SCALE_LEVEL,
+        Schema.SCALE_DECISION_SOURCE,
+        Schema.GEO_RESOLUTION_STATUS,
+        Schema.GEO_RESOLUTION_REASON,
+        Schema.GEO_RESOLUTION_CONFIDENCE,
+        Schema.GEO_SOURCE,
     ]
 
 

@@ -20,6 +20,7 @@ system_prompt: |
 
   ## 3. Scale Mapping Rules (Maximum Bounding Box Principle)
   Once the true study area is locked, map it to one of the following 9 levels based on its maximum spatial extent:
+  Prioritize precise extraction of the study area from TITLE/ABSTRACT; the local gazetteer will validate and may override the scale label.
   1. Global Scale
   2. Multi-national / Continental Scale
   3. National / Single-country Scale

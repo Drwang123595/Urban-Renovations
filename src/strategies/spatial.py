@@ -4,6 +4,7 @@ import unicodedata
 from typing import Dict, Any, Optional, Union, Tuple
 from pathlib import Path
 from .base import ExtractionStrategy
+from .geo_resolver import GeoResolver
 from ..prompting.generator import PromptGenerator
 from ..runtime.config import Schema
 from ..runtime.llm_client import DeepSeekClient
@@ -112,6 +113,14 @@ class SpatialExtractionStrategy(ExtractionStrategy):
     def __init__(self, client: DeepSeekClient, prompt_gen: PromptGenerator):
         super().__init__(client, prompt_gen)
         self.memory: Optional[ConversationMemory] = None
+        self.geo_resolver = GeoResolver()
+
+    def _get_geo_resolver(self) -> GeoResolver:
+        resolver = getattr(self, "geo_resolver", None)
+        if resolver is None:
+            resolver = GeoResolver()
+            self.geo_resolver = resolver
+        return resolver
 
     def _get_or_create_memory(
         self,
@@ -231,6 +240,16 @@ class SpatialExtractionStrategy(ExtractionStrategy):
             Schema.SPATIAL_VALIDATION_STATUS: validation_status,
             Schema.SPATIAL_VALIDATION_REASON: validation_reason,
             Schema.SPATIAL_AREA_EVIDENCE: evidence,
+            Schema.LLM_SPATIAL_SCALE_LEVEL_RAW: "",
+            Schema.RESOLVED_STUDY_AREA: "",
+            Schema.RESOLVED_GEO_ID: "",
+            Schema.AREA_HIERARCHY_PATH: "",
+            Schema.MAPPED_SPATIAL_SCALE_LEVEL: "",
+            Schema.SCALE_DECISION_SOURCE: "",
+            Schema.GEO_RESOLUTION_STATUS: "not_applicable",
+            Schema.GEO_RESOLUTION_REASON: "",
+            Schema.GEO_RESOLUTION_CONFIDENCE: "",
+            Schema.GEO_SOURCE: "",
         }
 
     def _normalize_for_match(self, value: Any) -> str:
@@ -411,9 +430,15 @@ class SpatialExtractionStrategy(ExtractionStrategy):
 
             is_spatial = self._normalize_spatial_flag(data.get("Is_Spatial_Research", False))
             area = data.get("Specific_Study_Area")
+            raw_scale_level = data.get("Spatial_Scale_Level")
+            scale_level = self._normalize_scale_level(raw_scale_level)
 
             default_result["Reasoning"] = data.get("Reasoning", "")
             default_result["Confidence"] = data.get("Confidence", "Low")
+            default_result[Schema.LLM_SPATIAL_SCALE_LEVEL_RAW] = self._clean_text_field(
+                raw_scale_level,
+                default="",
+            )
 
             if not is_spatial:
                 default_result[Schema.SPATIAL_VALIDATION_STATUS] = "not_spatial"
@@ -424,19 +449,6 @@ class SpatialExtractionStrategy(ExtractionStrategy):
             if self._is_placeholder_area(cleaned_area):
                 default_result[Schema.SPATIAL_VALIDATION_STATUS] = "rejected"
                 default_result[Schema.SPATIAL_VALIDATION_REASON] = "placeholder_or_generic_area"
-                default_result[Schema.SPATIAL_AREA_EVIDENCE] = cleaned_area
-                return default_result
-
-            scale_level = self._normalize_scale_level(data.get("Spatial_Scale_Level"))
-            if not scale_level:
-                default_result[Schema.SPATIAL_VALIDATION_STATUS] = "rejected"
-                default_result[Schema.SPATIAL_VALIDATION_REASON] = "missing_or_invalid_scale"
-                default_result[Schema.SPATIAL_AREA_EVIDENCE] = cleaned_area
-                return default_result
-
-            if self._area_scale_mismatch(cleaned_area, scale_level):
-                default_result[Schema.SPATIAL_VALIDATION_STATUS] = "rejected"
-                default_result[Schema.SPATIAL_VALIDATION_REASON] = "scale_area_mismatch"
                 default_result[Schema.SPATIAL_AREA_EVIDENCE] = cleaned_area
                 return default_result
 
@@ -451,8 +463,29 @@ class SpatialExtractionStrategy(ExtractionStrategy):
                 default_result[Schema.SPATIAL_AREA_EVIDENCE] = evidence or cleaned_area
                 return default_result
 
+            geo_resolution = self._get_geo_resolver().resolve(
+                cleaned_area,
+                llm_scale_level=scale_level,
+            )
+            default_result.update(geo_resolution.as_dict())
+            mapped_scale_level = geo_resolution.mapped_spatial_scale_level
+            if not mapped_scale_level:
+                default_result[Schema.SPATIAL_VALIDATION_STATUS] = "rejected"
+                default_result[Schema.SPATIAL_VALIDATION_REASON] = "missing_or_invalid_scale"
+                default_result[Schema.SPATIAL_AREA_EVIDENCE] = evidence or cleaned_area
+                return default_result
+
+            if (
+                geo_resolution.scale_decision_source == "llm_fallback_unresolved"
+                and self._area_scale_mismatch(cleaned_area, mapped_scale_level)
+            ):
+                default_result[Schema.SPATIAL_VALIDATION_STATUS] = "rejected"
+                default_result[Schema.SPATIAL_VALIDATION_REASON] = "scale_area_mismatch"
+                default_result[Schema.SPATIAL_AREA_EVIDENCE] = evidence or cleaned_area
+                return default_result
+
             default_result[Schema.IS_SPATIAL] = "1"
-            default_result[Schema.SPATIAL_LEVEL] = scale_level
+            default_result[Schema.SPATIAL_LEVEL] = mapped_scale_level
             default_result[Schema.SPATIAL_DESC] = cleaned_area
             default_result[Schema.SPATIAL_VALIDATION_STATUS] = "accepted"
             default_result[Schema.SPATIAL_VALIDATION_REASON] = validation_reason

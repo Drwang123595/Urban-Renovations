@@ -922,6 +922,16 @@ class TaskRouter:
             Schema.SPATIAL_VALIDATION_STATUS: result.get(Schema.SPATIAL_VALIDATION_STATUS, ""),
             Schema.SPATIAL_VALIDATION_REASON: result.get(Schema.SPATIAL_VALIDATION_REASON, ""),
             Schema.SPATIAL_AREA_EVIDENCE: result.get(Schema.SPATIAL_AREA_EVIDENCE, ""),
+            Schema.LLM_SPATIAL_SCALE_LEVEL_RAW: result.get(Schema.LLM_SPATIAL_SCALE_LEVEL_RAW, ""),
+            Schema.RESOLVED_STUDY_AREA: result.get(Schema.RESOLVED_STUDY_AREA, ""),
+            Schema.RESOLVED_GEO_ID: result.get(Schema.RESOLVED_GEO_ID, ""),
+            Schema.AREA_HIERARCHY_PATH: result.get(Schema.AREA_HIERARCHY_PATH, ""),
+            Schema.MAPPED_SPATIAL_SCALE_LEVEL: result.get(Schema.MAPPED_SPATIAL_SCALE_LEVEL, ""),
+            Schema.SCALE_DECISION_SOURCE: result.get(Schema.SCALE_DECISION_SOURCE, ""),
+            Schema.GEO_RESOLUTION_STATUS: result.get(Schema.GEO_RESOLUTION_STATUS, ""),
+            Schema.GEO_RESOLUTION_REASON: result.get(Schema.GEO_RESOLUTION_REASON, ""),
+            Schema.GEO_RESOLUTION_CONFIDENCE: result.get(Schema.GEO_RESOLUTION_CONFIDENCE, ""),
+            Schema.GEO_SOURCE: result.get(Schema.GEO_SOURCE, ""),
         }
 
     def _get_urban_session_path(self, task_name: str, index: int, run_id: str) -> Path:

@@ -34,6 +34,16 @@ class Schema:
     SPATIAL_VALIDATION_STATUS = "spatial_validation_status"
     SPATIAL_VALIDATION_REASON = "spatial_validation_reason"
     SPATIAL_AREA_EVIDENCE = "spatial_area_evidence"
+    LLM_SPATIAL_SCALE_LEVEL_RAW = "llm_spatial_scale_level_raw"
+    RESOLVED_STUDY_AREA = "resolved_study_area"
+    RESOLVED_GEO_ID = "resolved_geo_id"
+    AREA_HIERARCHY_PATH = "area_hierarchy_path"
+    MAPPED_SPATIAL_SCALE_LEVEL = "mapped_spatial_scale_level"
+    SCALE_DECISION_SOURCE = "scale_decision_source"
+    GEO_RESOLUTION_STATUS = "geo_resolution_status"
+    GEO_RESOLUTION_REASON = "geo_resolution_reason"
+    GEO_RESOLUTION_CONFIDENCE = "geo_resolution_confidence"
+    GEO_SOURCE = "geo_source"
     
     # All fields for consistent ordering
     FIELDS = [IS_URBAN_RENEWAL, IS_SPATIAL, SPATIAL_LEVEL, SPATIAL_DESC]

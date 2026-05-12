@@ -11,6 +11,7 @@ from src.config import Config, Schema
 from src.llm_client import DeepSeekClient
 from src.memory import ConversationMemory
 from src.prompts import PromptGenerator
+from src.strategies.geo_resolver import GeoResolver
 from src.strategies.spatial import SpatialExtractionStrategy
 from src.strategies.stepwise_long import StepwiseLongContextStrategy
 from src.urban_bertopic_service import ARTIFACT_INTEGRITY_VERSION, UrbanBERTopicService
@@ -509,7 +510,7 @@ def test_spatial_parser_accepts_restricted_implicit_country_evidence():
     assert result[Schema.SPATIAL_VALIDATION_REASON] == "implicit_country_region_evidence"
 
 
-def test_spatial_parser_rejects_implicit_country_with_city_scale():
+def test_spatial_parser_overrides_implicit_country_city_scale_with_mapping():
     strategy = SpatialExtractionStrategy.__new__(SpatialExtractionStrategy)
     response = json.dumps(
         {
@@ -527,9 +528,46 @@ def test_spatial_parser_rejects_implicit_country_with_city_scale():
         abstract="The study evaluates a national policy and government planning programme.",
     )
 
-    assert result[Schema.IS_SPATIAL] == "0"
-    assert result[Schema.SPATIAL_VALIDATION_STATUS] == "rejected"
-    assert result[Schema.SPATIAL_VALIDATION_REASON] == "scale_area_mismatch"
+    assert result[Schema.IS_SPATIAL] == "1"
+    assert result[Schema.SPATIAL_LEVEL] == "3. National / Single-country Scale"
+    assert result[Schema.MAPPED_SPATIAL_SCALE_LEVEL] == "3. National / Single-country Scale"
+    assert result[Schema.SCALE_DECISION_SOURCE] == "mapping_override_llm"
+    assert result[Schema.GEO_RESOLUTION_STATUS] == "matched"
+
+
+def test_spatial_parser_accepts_mapped_area_without_llm_scale():
+    strategy = SpatialExtractionStrategy.__new__(SpatialExtractionStrategy)
+    response = json.dumps(
+        {
+            "Reasoning": "The target study area is explicitly named.",
+            "Is_Spatial_Research": True,
+            "Spatial_Scale_Level": None,
+            "Specific_Study_Area": "Guangdong Province",
+            "Confidence": "High",
+        }
+    )
+
+    result = strategy.parse_json_output(
+        response,
+        title="Urban redevelopment in Guangdong Province",
+        abstract="The empirical analysis is conducted in Guangdong Province.",
+    )
+
+    assert result[Schema.IS_SPATIAL] == "1"
+    assert result[Schema.SPATIAL_LEVEL] == "5. Single-provincial / State Scale"
+    assert result[Schema.SCALE_DECISION_SOURCE] == "mapping_inferred_scale"
+    assert result[Schema.GEO_RESOLUTION_STATUS] == "matched"
+
+
+def test_geo_resolver_maps_core_scale_cases():
+    resolver = GeoResolver()
+
+    assert resolver.resolve("Shenzhen").mapped_spatial_scale_level == "7. Single-city / Municipal Scale"
+    assert resolver.resolve("China").mapped_spatial_scale_level == "3. National / Single-country Scale"
+    assert resolver.resolve("Guangdong Province").mapped_spatial_scale_level == "5. Single-provincial / State Scale"
+    assert resolver.resolve("Beijing and Shanghai").mapped_spatial_scale_level == "6. Multi-city / Megaregion Scale"
+    assert resolver.resolve("China and India").mapped_spatial_scale_level == "2. Multi-national / Continental Scale"
+    assert resolver.resolve("Yangtze River Delta").mapped_spatial_scale_level == "6. Multi-city / Megaregion Scale"
 
 
 @pytest.mark.parametrize(
