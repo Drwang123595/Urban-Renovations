@@ -1034,7 +1034,7 @@ def _match_weighted_terms(
 ) -> tuple[float, List[str]]:
     score = 0.0
     matched: List[str] = []
-    field_weights = {"title": 1.35, "abstract": 1.0}
+    field_weights = {"title": 1.0, "abstract": 1.35}
     for term in terms:
         normalized = normalize_phrase(term)
         if not normalized:

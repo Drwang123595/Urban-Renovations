@@ -15,6 +15,7 @@ from src.urban_rule_filter import (
     MetadataRuleFilter,
 )
 from src.urban_topic_classifier import TopicPrediction, UrbanTopicClassifier
+from src.urban_topic_taxonomy import score_topic_definition
 
 
 def test_build_keywords_merges_author_and_keywords_plus():
@@ -120,6 +121,21 @@ def test_topic_classifier_supports_title_abstract_only_prediction_without_traini
     nonurban_pred = classifier.predict(nonurban_record)
     assert nonurban_pred.topic_label in {"N7", "N8"}
     assert nonurban_pred.topic_group == "nonurban"
+
+
+def test_rule_topic_scoring_weights_abstract_above_title():
+    title_only = score_topic_definition(
+        "U5",
+        title="Brownfield redevelopment",
+        abstract="",
+    )
+    abstract_only = score_topic_definition(
+        "U5",
+        title="",
+        abstract="Brownfield redevelopment",
+    )
+
+    assert float(abstract_only["score"]) > float(title_only["score"])
 
 
 def test_topic_classifier_ignores_metadata_fields_in_prediction(tmp_path):
