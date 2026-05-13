@@ -1,4 +1,3 @@
-from .registry import StrategyRegistry
 from .base import ExtractionStrategy
 from .single import SingleTurnStrategy
 from .stepwise import StepwiseStrategy
@@ -15,3 +14,11 @@ __all__ = [
     "CoTStrategy",
     "ReflectionStrategy",
 ]
+
+
+def __getattr__(name):
+    if name == "StrategyRegistry":
+        from .registry import StrategyRegistry
+
+        return StrategyRegistry
+    raise AttributeError(name)

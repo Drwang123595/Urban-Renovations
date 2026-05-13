@@ -1,3 +1,3 @@
 from ._compat import alias_module
 
-alias_module(__name__, "src.urban.urban_topic_classifier", globals())
+alias_module(__name__, "src.urban.topic_model.local_classifier", globals())

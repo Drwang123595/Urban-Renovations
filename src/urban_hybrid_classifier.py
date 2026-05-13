@@ -1,3 +1,3 @@
 from ._compat import alias_module
 
-alias_module(__name__, "src.urban.urban_hybrid_classifier", globals())
+alias_module(__name__, "src.urban.hybrid.classifier", globals())

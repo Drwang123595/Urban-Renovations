@@ -16,6 +16,11 @@ except ImportError:
 
 from .config import Config
 
+
+class EmptyLLMResponseError(RuntimeError):
+    """Raised when a provider returns success without usable text."""
+
+
 class DeepSeekClient:
     """
     Generic LLM Client wrapper compatible with OpenAI SDK.
@@ -167,6 +172,24 @@ class DeepSeekClient:
                     parts.append(str(text))
         return "\n".join(parts)
 
+    def _describe_empty_response(self, response: Any) -> str:
+        fields = []
+        for name in ["id", "status", "finish_reason", "incomplete_details"]:
+            value = getattr(response, name, None)
+            if isinstance(response, dict):
+                value = response.get(name, value)
+            if value:
+                fields.append(f"{name}={self._shorten(value, limit=120)}")
+        output = getattr(response, "output", None)
+        if isinstance(response, dict):
+            output = response.get("output", output)
+        if output is not None:
+            try:
+                fields.append(f"output_items={len(output)}")
+            except TypeError:
+                fields.append("output_items=unknown")
+        return "; ".join(fields) or "no diagnostic fields"
+
     def _responses_completion(self, messages: List[Dict[str, str]], temperature: float):
         payload = self._messages_to_responses_payload(messages)
         response = self.client.responses.create(
@@ -176,8 +199,69 @@ class DeepSeekClient:
             stream=False,
             **payload,
         )
-        return self._extract_responses_text(response)
-            
+        text = self._extract_responses_text(response).strip()
+        if not text:
+            raise EmptyLLMResponseError(self._describe_empty_response(response))
+        return text
+
+    def _chat_completions_completion(self, messages: List[Dict[str, str]], temperature: float) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=Config.MAX_TOKENS,
+            stream=False
+        )
+        text = response.choices[0].message.content
+        text = "" if text is None else str(text).strip()
+        if not text:
+            raise EmptyLLMResponseError("chat_completions returned empty message content")
+        return text
+
+    def _chat_completions_fallback(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_retries: int,
+    ) -> Optional[str]:
+        if not hasattr(self.client, "chat"):
+            return None
+        for attempt in range(max_retries):
+            try:
+                print(
+                    "LLM Fallback | "
+                    f"mode=chat_completions | attempt={attempt+1}/{max_retries} | "
+                    f"model={self.model} | base_url={self.base_url}"
+                )
+                return self._chat_completions_completion(messages, temperature)
+            except EmptyLLMResponseError as e:
+                print(
+                    "Empty LLM Fallback Response | "
+                    f"attempt={attempt+1}/{max_retries} | "
+                    f"diagnostic={self._sanitize_diagnostic_text(e)}"
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(2 * (attempt + 1))
+            except RateLimitError as e:
+                print(f"Rate Limit Hit in fallback (Attempt {attempt+1}/{max_retries}): {e}")
+                time.sleep(5 * (attempt + 1))
+            except APIError as e:
+                self._print_api_error_diagnostics(e, attempt, max_retries)
+                print(
+                    f"API Error in fallback (Attempt {attempt+1}/{max_retries}): "
+                    f"{self._sanitize_diagnostic_text(e)}"
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(2 * (attempt + 1))
+            except Exception as e:
+                print(
+                    f"Unexpected Error in fallback (Attempt {attempt+1}/{max_retries}): "
+                    f"{self._sanitize_diagnostic_text(e)}"
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(2 * (attempt + 1))
+        return None
+
     def chat_completion(self, messages: List[Dict[str, str]], temperature: float = 0.1, max_retries: int = 3) -> Optional[str]:
         """
         Call LLM API for chat completion using OpenAI SDK.
@@ -192,19 +276,32 @@ class DeepSeekClient:
                 if self.api_mode == "responses":
                     return self._responses_completion(messages, temperature)
 
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=Config.MAX_TOKENS,
-                    stream=False
-                )
-
-                return response.choices[0].message.content
+                return self._chat_completions_completion(messages, temperature)
                 
             except RateLimitError as e:
                 print(f"Rate Limit Hit (Attempt {attempt+1}/{max_retries}): {e}")
                 time.sleep(5 * (attempt + 1)) # Aggressive backoff
+
+            except EmptyLLMResponseError as e:
+                print(
+                    "Empty LLM Response | "
+                    f"attempt={attempt+1}/{max_retries} | "
+                    f"mode={self.api_mode} | model={self.model} | "
+                    f"diagnostic={self._sanitize_diagnostic_text(e)}"
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(2 * (attempt + 1))
+                elif self.api_mode == "responses":
+                    fallback = self._chat_completions_fallback(
+                        messages,
+                        temperature,
+                        max_retries=max(1, min(2, max_retries)),
+                    )
+                    if fallback:
+                        return fallback
+                    return None
+                else:
+                    return None
                 
             except APIError as e:
                 self._print_api_error_diagnostics(e, attempt, max_retries)

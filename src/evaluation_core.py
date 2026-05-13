@@ -1,3 +1,3 @@
 from ._compat import alias_module
 
-alias_module(__name__, "src.evaluation.core", globals())
+alias_module(__name__, "src.evaluation.metrics", globals())
