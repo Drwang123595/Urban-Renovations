@@ -93,6 +93,7 @@ def test_dynamic_binary_refiner_can_flip_existing_labels_when_enabled_and_review
     config = DynamicBinaryRefinementConfig(
         unknown_only=False,
         allow_flip_existing=True,
+        force_flip_existing_mutation=True,
         require_review_flag_for_flip=True,
         near_threshold_margin=0.2,
     )
@@ -101,6 +102,49 @@ def test_dynamic_binary_refiner_can_flip_existing_labels_when_enabled_and_review
     assert refined.loc[0, "dynamic_binary_override_applied"] == 1
     assert str(refined.loc[0, "final_label"]).strip() == "1"
     assert str(refined.loc[0, "topic_final"]).strip() == "U1"
+
+
+def test_dynamic_binary_refiner_records_existing_flip_as_review_without_force_mutation():
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "Urban regeneration of old districts",
+                Schema.ABSTRACT: "This paper studies urban regeneration and redevelopment of old districts.",
+                Schema.IS_URBAN_RENEWAL: "0",
+                "final_label": "0",
+                "urban_flag": "0",
+                "topic_final": "N4",
+                "taxonomy_coverage_status": "covered",
+                "review_flag_raw": 1,
+                "uncertain_nonurban_guard_action": "review",
+                "urban_probability_score": 0.49,
+                "binary_decision_threshold": 0.5,
+                "dynamic_topic_id": "DUR_0303",
+                "dynamic_topic_size": 60,
+                "dynamic_topic_confidence": 0.88,
+                "dynamic_mapping_status": "mapped_to_fixed",
+                "dynamic_to_fixed_topic_candidate": "U1",
+                "dynamic_binary_candidate_label": "1",
+                "dynamic_binary_candidate_action": "possible_false_negative_cluster",
+            }
+        ]
+    )
+
+    config = DynamicBinaryRefinementConfig(
+        unknown_only=False,
+        allow_flip_existing=True,
+        require_review_flag_for_flip=True,
+        near_threshold_margin=0.2,
+    )
+    refined = DynamicBinaryRefiner(config).refine(frame, mutate_final_fields=True)
+
+    assert str(refined.loc[0, "dynamic_binary_override_applied"]).strip() in {"", "0"}
+    assert refined.loc[0, "dynamic_binary_override_label"] == "1"
+    assert refined.loc[0, "dynamic_binary_override_topic"] == "U1"
+    assert refined.loc[0, "dynamic_binary_override_source"] == "dynamic_topic_refiner_flip_review"
+    assert str(refined.loc[0, "final_label"]).strip() == "0"
+    assert str(refined.loc[0, "urban_flag"]).strip() == "0"
+    assert str(refined.loc[0, "topic_final"]).strip() == "N4"
 
 
 def test_dynamic_binary_refiner_does_not_flip_positive_to_negative_by_default():

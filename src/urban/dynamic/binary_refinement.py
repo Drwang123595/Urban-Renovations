@@ -125,6 +125,7 @@ class DynamicBinaryRefinementConfig:
     mutate_final_fields: bool = True
     unknown_only: bool = True
     allow_flip_existing: bool = False
+    force_flip_existing_mutation: bool = False
     require_review_flag_for_flip: bool = True
     near_threshold_margin: float = 0.08
     min_topic_confidence: float = 0.72
@@ -166,6 +167,10 @@ class DynamicBinaryRefinementConfig:
             mutate_final_fields=_ctx_bool("dynamic_binary_refinement_mutate", True),
             unknown_only=_ctx_bool("dynamic_binary_refinement_unknown_only", True),
             allow_flip_existing=_ctx_bool("dynamic_binary_refinement_allow_flip", False),
+            force_flip_existing_mutation=_ctx_bool(
+                "dynamic_binary_refinement_force_flip_existing_mutation",
+                False,
+            ),
             require_review_flag_for_flip=_ctx_bool(
                 "dynamic_binary_refinement_require_review_flag_for_flip",
                 True,
@@ -435,10 +440,16 @@ class DynamicBinaryRefiner:
             confidence = float(context.topic_confidence.loc[idx])
             size = int(context.topic_size.loc[idx])
             source = "dynamic_topic_refiner"
+            is_existing_flip = bool(context.conflict_mask.loc[idx] and not context.unknown_mask.loc[idx])
             if context.unknown_mask.loc[idx]:
                 source = "dynamic_topic_refiner_unknown"
-            elif context.conflict_mask.loc[idx]:
+            elif is_existing_flip:
                 source = "dynamic_topic_refiner_flip"
+
+            force_flip = bool(self.config.force_flip_existing_mutation)
+            review_only_flip = bool(is_existing_flip and not force_flip)
+            if review_only_flip:
+                source = "dynamic_topic_refiner_flip_review"
 
             reason = (
                 f"dynamic_topic={dynamic_topic_id.loc[idx]}; "
@@ -454,9 +465,10 @@ class DynamicBinaryRefiner:
                 candidate_topic=candidate_topic,
                 reason=reason,
                 source=source,
+                applied=0 if review_only_flip else 1,
             )
 
-            if mutate_final_fields:
+            if mutate_final_fields and not review_only_flip:
                 self._mutate_final_fields(
                     working,
                     idx,
@@ -475,10 +487,11 @@ class DynamicBinaryRefiner:
         candidate_topic: str,
         reason: str,
         source: str,
+        applied: int = 1,
     ) -> None:
         """Record dynamic binary evidence without touching final decision fields."""
 
-        working.at[idx, "dynamic_binary_override_applied"] = 1
+        working.at[idx, "dynamic_binary_override_applied"] = int(applied)
         working.at[idx, "dynamic_binary_override_label"] = candidate_label
         working.at[idx, "dynamic_binary_override_topic"] = candidate_topic
         working.at[idx, "dynamic_binary_override_reason"] = reason
