@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from scripts.simulate_prompt_injection import generate_injection_audit_md
+from scripts.security.simulate_prompt_injection import generate_injection_audit_md
 
 
 def test_generate_injection_audit_md(tmp_path: Path):

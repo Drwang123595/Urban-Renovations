@@ -1,7 +1,7 @@
 import pandas as pd
 
-from src.config import Schema
-from src.urban.dynamic_topic_discovery import (
+from src.runtime.config import Schema
+from src.urban.dynamic.topic_discovery import (
     DYNAMIC_BINARY_COLUMNS,
     DYNAMIC_TOPIC_COLUMNS,
     DynamicTopicConfig,

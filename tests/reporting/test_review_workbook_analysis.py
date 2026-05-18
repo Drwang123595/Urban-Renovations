@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 from openpyxl import load_workbook
 
-from src.review_workbook_analysis import (
+from src.reporting.review_workbook_analysis import (
     ANALYSIS_SHEET_NAME,
     ANALYSIS_SHEETS,
     ANALYSIS_SPATIAL_LEVEL,

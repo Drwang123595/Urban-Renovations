@@ -6,7 +6,7 @@ import yaml
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.prompt_strategy_manager import PromptStrategyManager
+from src.prompting.strategy_manager import PromptStrategyManager
 
 
 def make_entry(

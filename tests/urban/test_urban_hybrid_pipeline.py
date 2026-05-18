@@ -3,19 +3,19 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config import Schema
-from src.urban_bertopic_service import BERTopicSignal
-from src.urban_family_gate import FamilyGateDecision
-from src.urban_hybrid_classifier import UrbanHybridClassifier
-from src.urban_metadata import UrbanMetadataRecord, build_keywords
-from src.urban_rule_filter import (
+from src.runtime.config import Schema
+from src.urban.topic_model.bertopic_service import BERTopicSignal
+from src.urban.topic_model.family_gate import FamilyGateDecision
+from src.urban.hybrid.classifier import UrbanHybridClassifier
+from src.urban.core.metadata import UrbanMetadataRecord, build_keywords
+from src.urban.rules.metadata_filter import (
     METADATA_ROUTE_HARD_NEGATIVE,
     METADATA_ROUTE_UNCERTAIN,
     MetadataRouteResult,
     MetadataRuleFilter,
 )
-from src.urban_topic_classifier import TopicPrediction, UrbanTopicClassifier
-from src.urban_topic_taxonomy import score_topic_definition
+from src.urban.topic_model.local_classifier import TopicPrediction, UrbanTopicClassifier
+from src.urban.taxonomy.core import score_topic_definition
 
 
 def test_build_keywords_merges_author_and_keywords_plus():
@@ -1021,7 +1021,7 @@ def _assert_final_label_follows_binary_score(result):
 
 def test_hybrid_classifier_short_circuits_stage1_hard_negative(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _HighConfidenceUrbanClassifier(),
     )
     classifier = UrbanHybridClassifier(_NoCallLLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1038,7 +1038,7 @@ def test_hybrid_classifier_short_circuits_stage1_hard_negative(monkeypatch):
 
 def test_hybrid_classifier_uses_rule_model_fusion_when_rule_and_local_agree(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _HighConfidenceUrbanClassifier(),
     )
     classifier = UrbanHybridClassifier(_NoCallLLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1055,7 +1055,7 @@ def test_hybrid_classifier_uses_rule_model_fusion_when_rule_and_local_agree(monk
 
 def test_hybrid_classifier_prefers_rule_when_local_unknown(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(_NoCallLLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1070,7 +1070,7 @@ def test_hybrid_classifier_prefers_rule_when_local_unknown(monkeypatch):
 
 def test_hybrid_classifier_returns_unknown_for_cross_group_weak_conflict(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _WeakConflictClassifier(),
     )
     classifier = UrbanHybridClassifier(_LLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1142,7 +1142,7 @@ def test_hybrid_final_binary_label_is_not_overwritten_by_unknown_topic():
 
 def test_hybrid_classifier_can_disable_llm_for_unknown_review(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _WeakConflictClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1165,7 +1165,7 @@ def test_hybrid_classifier_can_disable_llm_for_unknown_review(monkeypatch):
 
 def test_hybrid_classifier_keeps_bertopic_as_auxiliary_hint_only(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _HighConfidenceUrbanClassifier(),
     )
     bertopic_service = _FakeBERTopicService(
@@ -1192,7 +1192,7 @@ def test_hybrid_classifier_keeps_bertopic_as_auxiliary_hint_only(monkeypatch):
 
 def test_hybrid_classifier_resolves_unknown_when_rule_urban_and_llm_family_align(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(_LLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1210,7 +1210,7 @@ def test_hybrid_classifier_resolves_unknown_when_rule_urban_and_llm_family_align
 
 def test_hybrid_classifier_resolves_unknown_when_rule_nonurban_and_llm_family_align(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(_NegativeLLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1229,10 +1229,10 @@ def test_hybrid_classifier_resolves_unknown_when_rule_nonurban_and_llm_family_al
 
 def test_hybrid_classifier_offline_recovers_u1_when_online_llm_hints_disabled(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
-    monkeypatch.setattr("src.config.Config.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED", False)
+    monkeypatch.setattr("src.runtime.config.Config.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED", False)
     classifier = UrbanHybridClassifier(_NoCallLLMStrategy(), bertopic_service=_NullBERTopicService())
     classifier.rule_filter = _U1UnknownRuleFilter()
     result = classifier.classify(
@@ -1249,7 +1249,7 @@ def test_hybrid_classifier_offline_recovers_u1_when_online_llm_hints_disabled(mo
 
 def test_hybrid_classifier_offline_recovers_u12_gentrification_without_llm(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1271,7 +1271,7 @@ def test_hybrid_classifier_offline_recovers_u12_gentrification_without_llm(monke
 
 def test_hybrid_classifier_offline_recovers_u4_redevelopment_without_llm(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1293,7 +1293,7 @@ def test_hybrid_classifier_offline_recovers_u4_redevelopment_without_llm(monkeyp
 
 def test_hybrid_classifier_offline_recovers_strong_local_u9_without_llm(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _VeryStrongUrbanConflictClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1315,7 +1315,7 @@ def test_hybrid_classifier_offline_recovers_strong_local_u9_without_llm(monkeypa
 
 def test_hybrid_classifier_resolves_cross_group_unknown_with_dual_urban_support(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _WeakConflictClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1344,7 +1344,7 @@ def test_hybrid_classifier_resolves_cross_group_unknown_with_dual_urban_support(
 
 def test_hybrid_classifier_resolves_curated_nonurban_rule_to_strong_local_urban(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _StrongUrbanConflictClassifier(),
     )
     classifier = UrbanHybridClassifier(_LLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1360,7 +1360,7 @@ def test_hybrid_classifier_resolves_curated_nonurban_rule_to_strong_local_urban(
 
 def test_hybrid_classifier_resolves_curated_u12_rule_over_housing_market_local(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _HousingMarketClassifier(),
     )
     classifier = UrbanHybridClassifier(_LLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1376,7 +1376,7 @@ def test_hybrid_classifier_resolves_curated_u12_rule_over_housing_market_local(m
 
 def test_hybrid_classifier_resolves_weak_nonurban_rule_when_local_unknown_and_llm_negative(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(_NegativeLLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1392,7 +1392,7 @@ def test_hybrid_classifier_resolves_weak_nonurban_rule_when_local_unknown_and_ll
 
 def test_hybrid_classifier_resolves_very_weak_nonurban_rule_when_local_unknown_and_llm_negative(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(_NegativeLLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1410,7 +1410,7 @@ def test_hybrid_classifier_resolves_very_weak_nonurban_rule_when_local_unknown_a
 
 def test_hybrid_classifier_resolves_curated_u4_rule_over_n1_local(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UrbanCoreN1Classifier(),
     )
     classifier = UrbanHybridClassifier(_LLMStrategy(), bertopic_service=_NullBERTopicService())
@@ -1426,7 +1426,7 @@ def test_hybrid_classifier_resolves_curated_u4_rule_over_n1_local(monkeypatch):
 
 def test_hybrid_classifier_family_gate_keeps_unknown_audit_fields_without_forcing_recovery(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _HousingMarketClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1455,7 +1455,7 @@ def test_hybrid_classifier_family_gate_keeps_unknown_audit_fields_without_forcin
 
 def test_hybrid_classifier_does_not_override_nonunknown_with_family_gate(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _HighConfidenceUrbanClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1477,7 +1477,7 @@ def test_hybrid_classifier_does_not_override_nonunknown_with_family_gate(monkeyp
 
 def test_hybrid_classifier_blocks_family_gate_recovery_when_llm_conflicts(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1498,7 +1498,7 @@ def test_hybrid_classifier_blocks_family_gate_recovery_when_llm_conflicts(monkey
 
 def test_anchor_guard_promotes_nonurban_with_core_anchor_and_support(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _AnchorGuardNonurbanWithUrbanAltClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1523,7 +1523,7 @@ def test_anchor_guard_promotes_nonurban_with_core_anchor_and_support(monkeypatch
 
 def test_anchor_guard_sends_core_anchor_without_support_to_unknown_review(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _AnchorGuardNonurbanNoSupportClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1550,7 +1550,7 @@ def test_anchor_guard_sends_core_anchor_without_support_to_unknown_review(monkey
 
 def test_anchor_guard_can_promote_with_urban_within_family_fallback(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _AnchorGuardFallbackUrbanCandidateClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1574,7 +1574,7 @@ def test_anchor_guard_can_promote_with_urban_within_family_fallback(monkeypatch)
 
 def test_uncertain_nonurban_gate_downgrades_n3_rule_local_agree_to_unknown(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _AnchorGuardNonurbanNoSupportClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1599,7 +1599,7 @@ def test_uncertain_nonurban_gate_downgrades_n3_rule_local_agree_to_unknown(monke
 
 def test_uncertain_nonurban_gate_keeps_n8_technical_without_renewal_signal(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _N8LocalAgreeClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1622,7 +1622,7 @@ def test_uncertain_nonurban_gate_keeps_n8_technical_without_renewal_signal(monke
 
 def test_uncertain_nonurban_gate_promotes_n8_with_renewal_and_strong_urban_local(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _N8UrbanConflictClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1682,7 +1682,7 @@ def test_anchor_guard_does_not_override_stage1_hard_negative_rural():
 
 def test_anchor_guard_does_not_trigger_on_urban_transformation_only(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _AnchorGuardNonurbanNoSupportClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1805,7 +1805,7 @@ def test_binary_recall_calibration_blocks_pure_n8_technical_risk():
 
 def test_open_set_promotes_unmapped_renewal_retrofit_topic(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1833,7 +1833,7 @@ def test_open_set_promotes_unmapped_renewal_retrofit_topic(monkeypatch):
 
 def test_open_set_promotes_unmapped_policy_project_with_renewal_anchor(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1859,7 +1859,7 @@ def test_open_set_promotes_unmapped_policy_project_with_renewal_anchor(monkeypat
 
 def test_open_set_does_not_absorb_general_city_governance(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _UnknownClassifier(),
     )
     classifier = UrbanHybridClassifier(
@@ -1882,7 +1882,7 @@ def test_open_set_does_not_absorb_general_city_governance(monkeypatch):
 
 def test_hybrid_classifier_preserves_review_rule_signal_for_nonunknown(monkeypatch):
     monkeypatch.setattr(
-        "src.urban_hybrid_classifier.UrbanTopicClassifier",
+        "src.urban.hybrid.classifier.UrbanTopicClassifier",
         lambda: _AnchorGuardNonurbanNoSupportClassifier(),
     )
     classifier = UrbanHybridClassifier(

@@ -5,8 +5,8 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config import Schema
-from src.merged_output import (
+from src.runtime.config import Schema
+from src.tasks.merged_output import (
     REVIEW_BINARY_EVIDENCE_COLUMN,
     REVIEW_BINARY_POLICY_ACTION_COLUMN,
     REVIEW_DERIVED_COLUMNS,
@@ -47,8 +47,8 @@ from src.merged_output import (
     build_review_ready_merged_frame,
     load_task_input_frame,
 )
-from src.task_router import TaskRouter, UrbanMethod
-from src.urban_topic_taxonomy import topic_name_for_label, topic_name_zh_for_label
+from src.tasks.router import TaskRouter, UrbanMethod
+from src.urban.taxonomy.core import topic_name_for_label, topic_name_zh_for_label
 
 
 SPATIAL_STUDY = "空间研究"

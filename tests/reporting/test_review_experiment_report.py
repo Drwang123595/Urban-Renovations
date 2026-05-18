@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 from docx import Document
 
-from src.review_experiment_report import REPORT_TITLE, generate_review_experiment_report
+from src.reporting.review_experiment_report import REPORT_TITLE, generate_review_experiment_report
 
 
 def _build_sample_review_frame() -> pd.DataFrame:

@@ -5,8 +5,8 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.prompt_strategy_registry import PromptStrategyRegistry
-from src.prompts import PromptGenerator
+from src.prompting.strategy_registry import PromptStrategyRegistry
+from src.prompting.generator import PromptGenerator
 
 
 def make_entry(

@@ -1,7 +1,7 @@
 import pandas as pd
 
 from scripts.data.merge_results import merge_results
-from src.config import Config, Schema
+from src.runtime.config import Config, Schema
 
 
 def test_legacy_merge_results_creates_result_dir_and_applies_strategy_filter(tmp_path, monkeypatch):

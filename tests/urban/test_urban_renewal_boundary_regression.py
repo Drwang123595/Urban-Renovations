@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from src.prompts import PromptGenerator
+from src.prompting.generator import PromptGenerator
 
 
 FIXTURE_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "urban_renewal_boundary_cases.json"

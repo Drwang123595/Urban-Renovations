@@ -1,7 +1,7 @@
 import pandas as pd
 
-from src.config import Schema
-from src.urban.dynamic_binary_refinement import DynamicBinaryRefinementConfig, DynamicBinaryRefiner
+from src.runtime.config import Schema
+from src.urban.dynamic.binary_refinement import DynamicBinaryRefinementConfig, DynamicBinaryRefiner
 
 
 def test_dynamic_binary_refiner_resolves_unknown_rows_into_binary_label_and_topic():

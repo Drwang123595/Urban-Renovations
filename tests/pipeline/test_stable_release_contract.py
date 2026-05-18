@@ -177,7 +177,7 @@ def test_stable_release_doc_records_thresholds_and_artifacts():
     assert "--urban-method local_topic_classifier --hybrid-llm-assist off --limit 10" in doc_text
     assert 'tmp\\stability_smoke\\local_topic_classifier_limit10.xlsx' in doc_text
     assert "--strict --strict-truth-match --coverage-threshold 0.01" in doc_text
-    assert "root-level `scripts/*.py` entries are legacy compatibility wrappers only" in doc_text
+    assert "`scripts/main.py` is the only root-level compatibility entry" in doc_text
     assert f"runs/stable_release/{DEFAULT_TAG}" in doc_text
     assert "Data/<dataset_id>/input/labels/<dataset_id>.xlsx" in doc_text
     assert "deepseek-v4-flash" in doc_text

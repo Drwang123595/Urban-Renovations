@@ -5,7 +5,7 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.prompts import PromptGenerator
+from src.prompting.generator import PromptGenerator
 
 
 def test_urban_renewal_four_strategies_loadable():

@@ -5,7 +5,7 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from scripts.evaluate import (
+from scripts.evaluation.evaluate import (
     build_group_summaries,
     build_long_context_stability,
     build_prediction_guardrails,
@@ -16,9 +16,9 @@ from scripts.evaluate import (
     resolve_truth_files,
     resolve_truth_for_prediction,
 )
-from src.config import Schema
-from src.evaluation_core import align_truth_pred, evaluate_merged, summarize_chunked_binary_metrics
-from src.task_router import TaskRouter
+from src.runtime.config import Schema
+from src.evaluation.metrics import align_truth_pred, evaluate_merged, summarize_chunked_binary_metrics
+from src.tasks.router import TaskRouter
 
 
 class _DummyPromptGen:

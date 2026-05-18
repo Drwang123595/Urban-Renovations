@@ -7,15 +7,15 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from scripts.debug_probe_llm import _build_env_snapshot
-from src.config import Config, Schema
-from src.llm_client import DeepSeekClient
-from src.memory import ConversationMemory
-from src.prompts import PromptGenerator
+from scripts.dev.debug_probe_llm import _build_env_snapshot
+from src.runtime.config import Config, Schema
+from src.runtime.llm_client import DeepSeekClient
+from src.runtime.memory import ConversationMemory
+from src.prompting.generator import PromptGenerator
 from src.strategies.geo_resolver import GeoResolver
 from src.strategies.spatial import SpatialExtractionStrategy
 from src.strategies.stepwise_long import StepwiseLongContextStrategy
-from src.urban_bertopic_service import ARTIFACT_INTEGRITY_VERSION, UrbanBERTopicService
+from src.urban.topic_model.bertopic_service import ARTIFACT_INTEGRITY_VERSION, UrbanBERTopicService
 
 
 class _CapturingClient:

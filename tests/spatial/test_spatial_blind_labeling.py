@@ -13,7 +13,7 @@ from scripts.analysis.spatial_blind_label_common import (
     parse_label_json,
     validate_label,
 )
-from src.config import Schema
+from src.runtime.config import Schema
 
 
 def test_parse_label_json_accepts_standard_object():

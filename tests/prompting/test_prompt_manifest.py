@@ -6,7 +6,7 @@ import yaml
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.prompt_manifest import (
+from src.prompting.manifest import (
     build_comparability_signature,
     build_long_context_group_signature,
     build_run_prompt_manifest,
@@ -16,7 +16,7 @@ from src.prompt_manifest import (
     load_prompt_manifest,
     write_prompt_manifest,
 )
-from src.prompt_strategy_registry import PromptStrategyRegistry
+from src.prompting.strategy_registry import PromptStrategyRegistry
 
 
 def make_entry(

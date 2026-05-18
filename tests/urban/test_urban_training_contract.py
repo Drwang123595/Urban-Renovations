@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from src.config import Config
-from src.urban_topic_classifier import UrbanTopicClassifier
-from src.urban_training_contract import (
+from src.runtime.config import Config
+from src.urban.topic_model.local_classifier import UrbanTopicClassifier
+from src.urban.core.training_contract import (
     allowed_training_workbooks,
     assert_training_source_contract,
     is_stable_release_training_workbook,

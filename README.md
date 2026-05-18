@@ -5,7 +5,7 @@ Current project contract as of 2026-04-27:
 - Runtime: Python `3.13`
 - Main entry: `scripts/pipeline/main_py313.py`
 - Stable pipeline entry: `scripts/pipeline/run_stable_release.py`
-- Legacy compatibility entries: `scripts/main.py` and root-level `scripts/*.py` wrappers
+- Legacy compatibility entry: `scripts/main.py`
 - Stable configuration: `three_stage_hybrid --hybrid-llm-assist on`
 - Stable model: `deepseek-v4-flash`
 - Primary task shape:

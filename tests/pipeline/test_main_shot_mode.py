@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 import scripts.main as main_module
 from scripts.main import (
     build_argument_parser,
+    build_run_context,
     choose_task_mode,
     get_enabled_shot_modes,
     normalize_hybrid_llm_assist,
@@ -24,9 +25,9 @@ from scripts.main import (
     task_requires_api_key,
     urban_method_requires_prompt,
 )
-from src.config import Config
-from src.prompt_strategy_registry import PromptStrategyRegistry
-from src.task_router import TaskType, UrbanMethod
+from src.runtime.config import Config
+from src.prompting.strategy_registry import PromptStrategyRegistry
+from src.tasks.router import TaskType, UrbanMethod
 
 
 def make_entry(
@@ -264,6 +265,35 @@ def test_urban_method_requires_prompt_skips_hybrid_prompt_when_llm_assist_off():
         )
         is True
     )
+
+
+def test_build_run_context_records_flow_audit_toggle():
+    context = build_run_context(
+        experiment_track="research_matrix",
+        dataset_id="demo_dataset",
+        truth_file="truth.xlsx",
+        task_mode=TaskType.URBAN_RENEWAL,
+        urban_method=UrbanMethod.THREE_STAGE_HYBRID,
+        hybrid_llm_assist_enabled=True,
+        session_policy="per_paper_isolated",
+        order_id="canonical_title_order",
+        order_seed=None,
+        max_samples_per_window=50,
+        dynamic_topics_enabled=False,
+        dynamic_topics_include_full_corpus=False,
+        dynamic_binary_refinement_enabled=False,
+        dynamic_binary_refinement_unknown_only=True,
+        dynamic_binary_refinement_allow_flip=False,
+        urban_flow_audit_enabled=False,
+    )
+
+    assert context["urban_flow_audit_enabled"] is False
+
+
+def test_argument_parser_accepts_flow_audit_toggle():
+    args = build_argument_parser().parse_args(["--urban-flow-audit", "off"])
+
+    assert args.urban_flow_audit == "off"
 
 
 def test_select_urban_method_uses_default_on_enter(monkeypatch):

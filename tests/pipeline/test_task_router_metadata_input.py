@@ -5,8 +5,8 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config import Schema
-from src.task_router import TaskRouter
+from src.runtime.config import Schema
+from src.tasks.router import TaskRouter
 
 
 def test_read_input_preserves_optional_metadata_columns(tmp_path):

@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.config import Schema
-from src.evaluation_core import (
+from src.runtime.config import Schema
+from src.evaluation.metrics import (
     align_truth_pred,
     evaluate_merged,
     summarize_bootstrap_ci,

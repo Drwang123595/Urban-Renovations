@@ -1,7 +1,7 @@
 import pandas as pd
 
-from src.config import Schema
-from src.urban.urban_binary_policy_v2 import UrbanBinaryPolicyV2
+from src.runtime.config import Schema
+from src.urban.hybrid.binary_policy_v2 import UrbanBinaryPolicyV2
 
 
 class _FakeLLMClient:

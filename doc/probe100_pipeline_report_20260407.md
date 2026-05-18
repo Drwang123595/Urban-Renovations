@@ -18,7 +18,7 @@
 ## 3. 运行命令
 
 ```powershell
-& 'C:\Users\26409\Desktop\Urban Renovation\.venv-bertopic313\Scripts\python.exe' scripts\benchmark_api_vs_classifier.py `
+& 'C:\Users\26409\Desktop\Urban Renovation\.venv-bertopic313\Scripts\python.exe' scripts\evaluation\benchmark_api_vs_classifier.py `
   --input "C:\Users\26409\Desktop\Urban Renovation\output\spreadsheet\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" `
   --truth-column "是否属于城市更新研究_local_v2" `
   --limit 100 `
