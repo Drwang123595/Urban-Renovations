@@ -9,7 +9,7 @@ import pandas as pd
 
 from ...runtime.config import Schema
 from ...runtime.llm_client import DeepSeekClient
-from ..urban_metadata import normalize_phrase
+from ..core.metadata import normalize_phrase
 from ..taxonomy.core import (
     COMMON_EXISTING_URBAN_OBJECTS,
     COMMON_METHOD_ANCHORS,

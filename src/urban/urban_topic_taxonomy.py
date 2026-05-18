@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.urban.taxonomy.core`."""
 
-alias_module(__name__, "src.urban.taxonomy.core", globals())
+from .taxonomy.core import *  # noqa: F403

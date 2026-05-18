@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.urban.topic_model.local_classifier`."""
 
-alias_module(__name__, "src.urban.topic_model.local_classifier", globals())
+from .topic_model.local_classifier import *  # noqa: F403

@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.tasks.router`."""
 
-alias_module(__name__, "src.tasks.router", globals())
+from .router import *  # noqa: F403

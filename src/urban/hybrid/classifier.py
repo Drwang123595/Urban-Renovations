@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from ...runtime.config import Config, Schema
 from ..topic_model.bertopic_service import BERTopicSignal, UrbanBERTopicService
 from ..topic_model.family_gate import UrbanFamilyGate
-from ..urban_metadata import UrbanMetadataRecord, normalize_phrase
+from ..core.metadata import UrbanMetadataRecord, normalize_phrase
 from ..rules.metadata_filter import (
     METADATA_ROUTE_HARD_NEGATIVE,
     MetadataRuleFilter,

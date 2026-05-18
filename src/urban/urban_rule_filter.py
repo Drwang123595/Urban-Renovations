@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.urban.rules.metadata_filter`."""
 
-alias_module(__name__, "src.urban.rules.metadata_filter", globals())
+from .rules.metadata_filter import *  # noqa: F403

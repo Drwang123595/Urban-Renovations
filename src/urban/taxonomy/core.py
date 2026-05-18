@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Sequence
 
-from ..urban_metadata import normalize_phrase
+from ..core.metadata import normalize_phrase
 
 
 UNKNOWN_TOPIC_LABEL = "Unknown"

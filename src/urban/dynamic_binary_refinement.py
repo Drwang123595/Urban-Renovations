@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.urban.dynamic.binary_refinement`."""
 
-alias_module(__name__, "src.urban.dynamic.binary_refinement", globals())
+from .dynamic.binary_refinement import *  # noqa: F403

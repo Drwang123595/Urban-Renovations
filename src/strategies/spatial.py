@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.spatial.extraction`."""
 
-alias_module(__name__, "src.spatial.extraction", globals())
+from ..spatial.extraction import *  # noqa: F403

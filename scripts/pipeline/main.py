@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+from scripts.pipeline import main_py313 as _main_py313
+from scripts.pipeline.main_py313 import *  # noqa: F403
+
 
 _PIPELINE_ENTRY = _PROJECT_ROOT / "scripts" / "pipeline" / "main_py313.py"
 _PY313_PYTHON = _PROJECT_ROOT / ".venv-bertopic313" / "Scripts" / "python.exe"
@@ -36,16 +39,10 @@ def _run_as_script(argv: list[str] | None = None) -> int:
     project_python_result = _run_with_project_python(argv)
     if project_python_result is not None:
         return int(project_python_result)
-
-    from scripts.pipeline import main_py313
-
-    return int(main_py313.main(argv) or 0)
+    return int(_main_py313.main(argv) or 0)
 
 
 if __name__ == "__main__":
     raise SystemExit(_run_as_script())
-
-
-from scripts._compat import load_script_module
-
-_module = load_script_module(__name__, "scripts.pipeline.main_py313", globals())
+else:
+    sys.modules[__name__] = _main_py313

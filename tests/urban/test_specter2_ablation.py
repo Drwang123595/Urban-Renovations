@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from scripts.analysis.evaluate_specter2_urban_ablation import run_ablation
+from scripts.analysis.specter2.evaluate_urban_ablation import run_ablation
 from src.runtime.config import Schema
 from src.urban.specter2.encoder import EncodingResult, Specter2Encoder
 from src.urban.specter2.evaluator import evaluate_specter2_ablation

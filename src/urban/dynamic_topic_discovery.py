@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.urban.dynamic.topic_discovery`."""
 
-alias_module(__name__, "src.urban.dynamic.topic_discovery", globals())
+from .dynamic.topic_discovery import *  # noqa: F403

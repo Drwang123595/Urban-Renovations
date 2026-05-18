@@ -5,8 +5,8 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from scripts.analysis.evaluate_spatial_gpt_vs_pipeline import prepare_eval_frame
-from scripts.analysis.spatial_blind_label_common import (
+from scripts.analysis.spatial.evaluate_gpt_vs_pipeline import prepare_eval_frame
+from scripts.analysis.spatial.blind_label_common import (
     area_match_type,
     binary_metrics,
     parse_batch_json,
