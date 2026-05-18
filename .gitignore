@@ -32,6 +32,7 @@ env/
 # Local assistant / tool metadata
 .trae/
 .codex-tmp/
+tmpcodex-pytest-cache-*/
 
 # Testing
 .pytest_cache/
