@@ -172,3 +172,40 @@ def test_dynamic_binary_refiner_does_not_flip_unknown_positive_to_negative():
     assert str(refined.loc[0, "dynamic_binary_override_applied"]).strip() in {"", "0"}
     assert str(refined.loc[0, "final_label"]).strip() == "1"
     assert str(refined.loc[0, "topic_final"]).strip() == "Unknown"
+
+
+def test_dynamic_binary_refiner_can_record_override_evidence_without_mutating_final_fields():
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "Brownfield redevelopment and adaptive reuse",
+                Schema.ABSTRACT: "Study of brownfield redevelopment projects and urban revitalization.",
+                Schema.IS_URBAN_RENEWAL: "",
+                "final_label": "",
+                "urban_flag": "",
+                "topic_final": "Unknown",
+                "topic_final_group": "unknown",
+                "taxonomy_coverage_status": "unknown",
+                "dynamic_topic_id": "DUR_0101",
+                "dynamic_topic_size": 42,
+                "dynamic_topic_confidence": 0.87,
+                "dynamic_mapping_status": "mapped_to_fixed",
+                "dynamic_to_fixed_topic_candidate": "U9",
+                "dynamic_binary_candidate_label": "1",
+                "dynamic_binary_candidate_action": "possible_false_negative_cluster",
+            }
+        ]
+    )
+
+    refined = DynamicBinaryRefiner(DynamicBinaryRefinementConfig()).refine(
+        frame,
+        mutate_final_fields=False,
+    )
+
+    assert refined.loc[0, "dynamic_binary_override_applied"] == 1
+    assert refined.loc[0, "dynamic_binary_override_label"] == "1"
+    assert refined.loc[0, "dynamic_binary_override_topic"] == "U9"
+    assert str(refined.loc[0, Schema.IS_URBAN_RENEWAL]).strip() == ""
+    assert str(refined.loc[0, "final_label"]).strip() == ""
+    assert str(refined.loc[0, "urban_flag"]).strip() == ""
+    assert str(refined.loc[0, "topic_final"]).strip() == "Unknown"

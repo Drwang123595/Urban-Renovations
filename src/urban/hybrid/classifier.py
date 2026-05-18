@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -30,6 +31,17 @@ from ..taxonomy.core import (
     topic_group_for_label,
     topic_name_for_label,
     urban_flag_for_topic_label,
+)
+from .binary_scoring import (
+    BINARY_HARD_NEGATIVE_REASONS,
+    apply_binary_decision as _apply_binary_decision_helper,
+    normalize_final_binary_label as _normalize_final_binary_label_helper,
+    resolve_binary_audit_topic as _resolve_binary_audit_topic_helper,
+)
+from .boundary_guards import apply_boundary_guards as _apply_boundary_guards_helper
+from .result_contract import (
+    build_base_output as _build_base_output_helper,
+    build_final_result as _build_final_result_helper,
 )
 
 
@@ -113,7 +125,6 @@ UNCERTAIN_NONURBAN_PROMOTE_BOUNDARY_BUCKETS = {
     "governance_policy_finance_boundary",
 }
 UNCERTAIN_NONURBAN_HIGH_RISK_RULES = {"N1", "N3", "N4", "N5", "N7", "N9", "N10"}
-BINARY_HARD_NEGATIVE_REASONS = {"math_term_misuse", "rural_nonurban"}
 BINARY_RISK_ADJUSTMENTS = {
     RISK_GENERIC_TECHNICAL: -0.06,
     RISK_BACKGROUND_SUPPORT: -0.08,
@@ -210,6 +221,18 @@ BROWNFIELD_NONURBAN_BLOCK_TERMS = (
 )
 
 
+@dataclass
+class HybridDecisionState:
+    """Mutable decision state passed between hybrid-classifier stages."""
+
+    final_topic: str
+    decision_source: str
+    decision_reason: str
+    confidence: float
+    review_flag: int = 0
+    review_reason: str = ""
+
+
 class UrbanHybridClassifier:
     def __init__(
         self,
@@ -236,11 +259,75 @@ class UrbanHybridClassifier:
         session_path: Optional[Path] = None,
         audit_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        record, route_result, base = self._stage1_build_rule_baseline(
+            title=title,
+            abstract=abstract,
+            metadata=metadata,
+        )
+        hard_negative_result = self._stage1_maybe_return_hard_negative(
+            base,
+            record=record,
+            route_result=route_result,
+        )
+        if hard_negative_result is not None:
+            return hard_negative_result
+
+        topic_prediction, bertopic_signal = self._stage2_attach_model_evidence(
+            base,
+            record=record,
+        )
+        state, llm_family_hint, fusion_final_topic = self._stage3_fuse_and_recover_unknown(
+            base,
+            title=title,
+            abstract=abstract,
+            record=record,
+            route_result=route_result,
+            topic_prediction=topic_prediction,
+            bertopic_signal=bertopic_signal,
+            session_path=session_path,
+            audit_metadata=audit_metadata,
+        )
+        state = self._stage4_apply_boundary_guards(
+            base,
+            record=record,
+            route_result=route_result,
+            topic_prediction=topic_prediction,
+            bertopic_signal=bertopic_signal,
+            state=state,
+            llm_family_hint=llm_family_hint,
+            fusion_final_topic=fusion_final_topic,
+        )
+        return self._stage5_apply_binary_and_build_result(
+            base,
+            record=record,
+            route_result=route_result,
+            state=state,
+        )
+
+    def _stage1_build_rule_baseline(
+        self,
+        *,
+        title: str,
+        abstract: str,
+        metadata: Optional[Dict[str, Any]],
+    ) -> tuple[UrbanMetadataRecord, Any, Dict[str, Any]]:
+        """Build the metadata record, fixed-rule route, and base output fields."""
+
         row = dict(metadata or {})
         row.update({Schema.TITLE: title, Schema.ABSTRACT: abstract})
         record = UrbanMetadataRecord.from_row(row)
         route_result = self.rule_filter.evaluate(record)
         base = self._build_base_output(record=record, route_result=route_result)
+        return record, route_result, base
+
+    def _stage1_maybe_return_hard_negative(
+        self,
+        base: Dict[str, Any],
+        *,
+        record: UrbanMetadataRecord,
+        route_result: Any,
+    ) -> Optional[Dict[str, Any]]:
+        """Short-circuit hard negatives before local topic or LLM evidence is used."""
 
         if route_result.route == METADATA_ROUTE_HARD_NEGATIVE:
             base.update(
@@ -278,23 +365,48 @@ class UrbanHybridClassifier:
                 review_reason=review_reason,
                 binary_label=binary_label,
             )
+        return None
+
+    def _stage2_attach_model_evidence(
+        self,
+        base: Dict[str, Any],
+        *,
+        record: UrbanMetadataRecord,
+    ) -> tuple[TopicPrediction, BERTopicSignal]:
+        """Attach local-topic and BERTopic auxiliary evidence to the base row."""
 
         topic_prediction = self.topic_classifier.predict(record)
         bertopic_signal = self.bertopic_service.predict(record)
         self._attach_local_topic(base, topic_prediction)
         self._attach_bertopic_hint(base, bertopic_signal)
+        return topic_prediction, bertopic_signal
+
+    def _stage3_fuse_and_recover_unknown(
+        self,
+        base: Dict[str, Any],
+        *,
+        title: str,
+        abstract: str,
+        record: UrbanMetadataRecord,
+        route_result: Any,
+        topic_prediction: TopicPrediction,
+        bertopic_signal: BERTopicSignal,
+        session_path: Optional[Path],
+        audit_metadata: Optional[Dict[str, Any]],
+    ) -> tuple[HybridDecisionState, str, str]:
+        """Fuse rule/local evidence and attempt guarded Unknown recovery."""
 
         fusion = self._fuse_rule_and_local(
             route_result=route_result,
             topic_prediction=topic_prediction,
         )
         llm_family_hint = ""
-        final_topic = fusion["final_topic"]
-        decision_source = fusion["decision_source"]
-        decision_reason = fusion["decision_reason"]
-        confidence = fusion["confidence"]
-        review_flag = 0
-        review_reason = ""
+        state = HybridDecisionState(
+            final_topic=fusion["final_topic"],
+            decision_source=fusion["decision_source"],
+            decision_reason=fusion["decision_reason"],
+            confidence=fusion["confidence"],
+        )
         if fusion["final_topic"] == UNKNOWN_TOPIC_LABEL:
             base["unknown_recovery_path"] = "pending_review"
             llm_hint = self._maybe_collect_llm_hint(
@@ -317,137 +429,86 @@ class UrbanHybridClassifier:
                 llm_family_hint=base.get("llm_family_hint", ""),
             )
             if resolved["final_topic"] != UNKNOWN_TOPIC_LABEL:
-                final_topic = resolved["final_topic"]
-                decision_source = resolved["decision_source"]
-                decision_reason = resolved["decision_reason"]
-                confidence = resolved["confidence"]
+                state.final_topic = resolved["final_topic"]
+                state.decision_source = resolved["decision_source"]
+                state.decision_reason = resolved["decision_reason"]
+                state.confidence = resolved["confidence"]
                 base["unknown_recovery_path"] = str(
-                    resolved.get("recovery_path", decision_source or "unknown_hint_resolution")
+                    resolved.get("recovery_path", state.decision_source or "unknown_hint_resolution")
                 )
                 base["unknown_recovery_evidence"] = str(resolved.get("recovery_evidence", "") or "")
             else:
-                review_reason = fusion["review_reason"]
-                decision_source = "unknown_review"
-                decision_reason = fusion["decision_reason"]
-                confidence = max(route_result.topic_rule_score / 10.0, float(topic_prediction.confidence))
-                review_flag = 1
+                state.review_reason = fusion["review_reason"]
+                state.decision_source = "unknown_review"
+                state.decision_reason = fusion["decision_reason"]
+                state.confidence = max(route_result.topic_rule_score / 10.0, float(topic_prediction.confidence))
+                state.review_flag = 1
                 base["unknown_recovery_path"] = str(resolved.get("recovery_path", "retained_unknown") or "retained_unknown")
                 evidence = str(resolved.get("recovery_evidence", "") or "")
-                base["unknown_recovery_evidence"] = evidence or review_reason
+                base["unknown_recovery_evidence"] = evidence or state.review_reason
             if llm_family_hint in {"0", "1"}:
-                review_reason = f"{review_reason};llm_family_hint={llm_family_hint}".strip(";")
+                state.review_reason = f"{state.review_reason};llm_family_hint={llm_family_hint}".strip(";")
                 if base.get("unknown_recovery_evidence"):
                     base["unknown_recovery_evidence"] = (
                         f"{base['unknown_recovery_evidence']};llm_family_hint={llm_family_hint}"
                     ).strip(";")
                 else:
                     base["unknown_recovery_evidence"] = f"llm_family_hint={llm_family_hint}"
+        return state, llm_family_hint, fusion["final_topic"]
 
-        final_topic, decision_source, decision_reason, confidence = self._apply_family_gate(
+    def _stage4_apply_boundary_guards(
+        self,
+        base: Dict[str, Any],
+        *,
+        record: UrbanMetadataRecord,
+        route_result: Any,
+        topic_prediction: TopicPrediction,
+        bertopic_signal: BERTopicSignal,
+        state: HybridDecisionState,
+        llm_family_hint: str,
+        fusion_final_topic: str,
+    ) -> HybridDecisionState:
+        return _apply_boundary_guards_helper(
+            self,
             base,
             record=record,
             route_result=route_result,
             topic_prediction=topic_prediction,
             bertopic_signal=bertopic_signal,
+            state=state,
             llm_family_hint=llm_family_hint,
-            candidate_final_topic=final_topic,
-            decision_source=decision_source,
-            decision_reason=decision_reason,
-            confidence=confidence,
+            fusion_final_topic=fusion_final_topic,
         )
-        (
-            final_topic,
-            decision_source,
-            decision_reason,
-            confidence,
-            review_flag,
-            review_reason,
-        ) = self._apply_anchor_guard(
+
+    def _stage5_apply_binary_and_build_result(
+        self,
+        base: Dict[str, Any],
+        *,
+        record: UrbanMetadataRecord,
+        route_result: Any,
+        state: HybridDecisionState,
+    ) -> Dict[str, Any]:
+        """Apply binary scoring and materialize the final row-level contract."""
+
+        binary_label, state.confidence, state.review_flag, state.review_reason = self._apply_binary_decision(
             base,
             record=record,
             route_result=route_result,
-            topic_prediction=topic_prediction,
-            bertopic_signal=bertopic_signal,
-            final_topic=final_topic,
-            decision_source=decision_source,
-            decision_reason=decision_reason,
-            confidence=confidence,
-            review_flag=review_flag,
-            review_reason=review_reason,
-        )
-        (
-            final_topic,
-            decision_source,
-            decision_reason,
-            confidence,
-            review_flag,
-            review_reason,
-        ) = self._apply_uncertain_nonurban_guard(
-            base,
-            record=record,
-            route_result=route_result,
-            topic_prediction=topic_prediction,
-            bertopic_signal=bertopic_signal,
-            final_topic=final_topic,
-            decision_source=decision_source,
-            decision_reason=decision_reason,
-            confidence=confidence,
-            review_flag=review_flag,
-            review_reason=review_reason,
-        )
-        if final_topic != UNKNOWN_TOPIC_LABEL and fusion["final_topic"] != UNKNOWN_TOPIC_LABEL:
-            base["unknown_recovery_path"] = "not_triggered"
-            base["unknown_recovery_evidence"] = ""
-        if final_topic == UNKNOWN_TOPIC_LABEL and str(base.get("unknown_recovery_path", "") or "") in {
-            "",
-            "not_triggered",
-            "pending_review",
-        }:
-            base["unknown_recovery_path"] = "retained_unknown"
-            base["unknown_recovery_evidence"] = str(base.get("unknown_recovery_evidence", "") or review_reason or "")
-        review_flag, review_reason = self._merge_rule_review_signal(
-            base=base,
-            final_topic=final_topic,
-            review_flag=review_flag,
-            review_reason=review_reason,
-        )
-        (
-            final_topic,
-            decision_source,
-            decision_reason,
-            confidence,
-            review_flag,
-            review_reason,
-        ) = self._apply_open_set_topic(
-            base,
-            record=record,
-            route_result=route_result,
-            final_topic=final_topic,
-            decision_source=decision_source,
-            decision_reason=decision_reason,
-            confidence=confidence,
-            review_flag=review_flag,
-            review_reason=review_reason,
-        )
-        binary_label, confidence, review_flag, review_reason = self._apply_binary_decision(
-            base,
-            record=record,
-            route_result=route_result,
-            final_topic=final_topic,
-            decision_source=decision_source,
-            decision_reason=decision_reason,
-            confidence=confidence,
-            review_flag=review_flag,
-            review_reason=review_reason,
+            final_topic=state.final_topic,
+            decision_source=state.decision_source,
+            decision_reason=state.decision_reason,
+            confidence=state.confidence,
+            review_flag=state.review_flag,
+            review_reason=state.review_reason,
         )
         return self._build_final_result(
             base,
-            final_topic=final_topic,
-            decision_source=decision_source,
-            decision_reason=decision_reason,
-            confidence=confidence,
-            review_flag=review_flag,
-            review_reason=review_reason,
+            final_topic=state.final_topic,
+            decision_source=state.decision_source,
+            decision_reason=state.decision_reason,
+            confidence=state.confidence,
+            review_flag=state.review_flag,
+            review_reason=state.review_reason,
             binary_label=binary_label,
         )
 
@@ -457,147 +518,7 @@ class UrbanHybridClassifier:
         record: UrbanMetadataRecord,
         route_result,
     ) -> Dict[str, Any]:
-        return {
-            **record.to_output_dict(),
-            "urban_flag": "",
-            "metadata_route": route_result.route,
-            "metadata_route_reason": route_result.reason,
-            "metadata_candidate_topic_buckets": "; ".join(route_result.candidate_topic_buckets),
-            "metadata_candidate_matches": "; ".join(route_result.matched_candidate_terms),
-            "metadata_negative_domains": "; ".join(route_result.matched_negative_domains),
-            "metadata_negative_keywords": "; ".join(route_result.matched_negative_keywords),
-            "metadata_related_domains": "; ".join(route_result.matched_related_domains),
-            "metadata_filter_result": route_result.route,
-            "metadata_filter_reason": route_result.reason,
-            "metadata_positive_signals": "; ".join(route_result.matched_candidate_terms),
-            "stage1_decision": route_result.stage1_decision,
-            "stage1_reason_tag": route_result.stage1_reason_tag,
-            "stage1_hit_signals": "; ".join(route_result.stage1_hit_signals),
-            "stage1_risk_tags": "; ".join(route_result.stage1_risk_tags),
-            "stage1_conflict_flag": route_result.stage1_conflict_flag,
-            "topic_rule": route_result.topic_rule,
-            "topic_rule_group": route_result.topic_rule_group,
-            "topic_rule_name": route_result.topic_rule_name,
-            "topic_rule_score": route_result.topic_rule_score,
-            "topic_rule_margin": route_result.topic_rule_margin,
-            "topic_rule_top3": "; ".join(route_result.topic_rule_top3),
-            "topic_rule_matches": "; ".join(route_result.topic_rule_matches),
-            "review_flag_rule": int(route_result.review_flag_rule),
-            "review_reason_rule": route_result.review_reason_rule,
-            "decision_source": "",
-            "decision_reason": "",
-            "llm_used": 0,
-            "llm_attempted": 0,
-            "llm_failure_reason": "",
-            "llm_family_hint": "",
-            "llm_family_hint_reason": "",
-            "topic_family_rule": route_result.topic_rule_group or UNKNOWN_TOPIC_GROUP,
-            "topic_family_local": UNKNOWN_TOPIC_GROUP,
-            "topic_family_final": UNKNOWN_TOPIC_GROUP,
-            "family_predicted_family": UNKNOWN_TOPIC_GROUP,
-            "family_decision_source": "",
-            "family_confidence": 0.0,
-            "family_probability_urban": 0.0,
-            "topic_within_family_label": "",
-            "topic_family_within_score": 0.0,
-            "topic_family_within_margin": 0.0,
-            "boundary_bucket": "",
-            "family_conflict_pattern": "",
-            "unknown_recovery_path": "not_triggered",
-            "unknown_recovery_evidence": "",
-            "review_flag": 0,
-            "review_reason": "",
-            "anchor_guard_flag": 0,
-            "anchor_guard_action": "none",
-            "anchor_guard_reason": "",
-            "anchor_guard_hits": "",
-            "uncertain_nonurban_guard_flag": 0,
-            "uncertain_nonurban_guard_action": "none",
-            "uncertain_nonurban_guard_reason": "",
-            "uncertain_nonurban_guard_evidence": "",
-            "urban_probability_score": "",
-            "binary_decision_threshold": "",
-            "binary_decision_source": "",
-            "binary_decision_evidence": "",
-            "binary_topic_consistency_flag": 0,
-            "binary_recall_calibration_flag": 0,
-            "binary_recall_calibration_tier": "none",
-            "binary_recall_calibration_reason": "",
-            "binary_audit_resolution_flag": 0,
-            "binary_audit_resolution_action": "none",
-            "binary_audit_resolution_reason": "",
-            "binary_audit_resolution_evidence": "",
-            "review_flag_raw": 0,
-            "review_reason_raw": "",
-            "open_set_flag": 0,
-            "open_set_topic": "",
-            "open_set_reason": "",
-            "open_set_evidence": "",
-            "taxonomy_coverage_status": "unknown",
-            "decision_explanation": "",
-            "primary_positive_evidence": "",
-            "primary_negative_evidence": "",
-            "evidence_balance": "",
-            "decision_rule_stack": "",
-            "legacy_topic_label": "",
-            "legacy_topic_group": "",
-            "legacy_topic_name": "",
-            "topic_local_label": "",
-            "topic_local_group": "",
-            "topic_local_name": "",
-            "topic_local_confidence": 0.0,
-            "topic_local_margin": 0.0,
-            "topic_local_top3": "",
-            "topic_label": "",
-            "topic_group": "",
-            "topic_name": "",
-            "topic_final": "",
-            "topic_final_group": "",
-            "topic_final_name": "",
-            "topic_confidence": 0.0,
-            "topic_margin": 0.0,
-            "topic_confidence_effective": 0.0,
-            "topic_margin_effective": 0.0,
-            "topic_matches": "",
-            "topic_binary_score": 0.0,
-            "topic_binary_probability": 0.0,
-            "bertopic_status": "",
-            "bertopic_topic_id": -1,
-            "bertopic_topic_name": "",
-            "bertopic_probability": 0.0,
-            "bertopic_is_outlier": 0,
-            "bertopic_count": 0,
-            "bertopic_pos_rate": "",
-            "bertopic_mapped_label": "",
-            "bertopic_mapped_group": "",
-            "bertopic_mapped_name": "",
-            "bertopic_label_purity": 0.0,
-            "bertopic_mapped_label_share": 0.0,
-            "bertopic_top_terms": "",
-            "bertopic_sample_titles": "",
-            "bertopic_source_split": "",
-            "bertopic_high_purity": 0,
-            "bertopic_true_outlier": 0,
-            "bertopic_prior_mode": "auxiliary_only",
-            "bertopic_confidence_delta": 0.0,
-            "bertopic_margin_delta": 0.0,
-            "bertopic_hint_label": "",
-            "bertopic_hint_group": "",
-            "bertopic_hint_name": "",
-            "bertopic_hint_conflict_flag": 0,
-            "bertopic_cluster_quality": "",
-            "bertopic_dynamic_topic_id": -1,
-            "bertopic_dynamic_topic_words": "",
-            "bertopic_primary_label": "",
-            "bertopic_primary_group": "",
-            "bertopic_primary_name": "",
-            "bertopic_primary_probability": 0.0,
-            "bertopic_primary_support": 0,
-            "bertopic_primary_purity": 0.0,
-            "bertopic_primary_mapped_share": 0.0,
-            "bertopic_primary_override": 0,
-            "bertopic_primary_reason": "",
-        }
+        return _build_base_output_helper(self, record=record, route_result=route_result)
 
     def _attach_local_topic(self, base: Dict[str, Any], topic_prediction: TopicPrediction) -> None:
         base.update(
@@ -1630,110 +1551,18 @@ class UrbanHybridClassifier:
         review_flag: int,
         review_reason: str,
     ) -> tuple[str, float, int, str]:
-        if not bool(Config.URBAN_BINARY_DECISION_ENABLED):
-            label = urban_flag_for_topic_label(final_topic)
-            return label, confidence, review_flag, review_reason
-
-        threshold = float(Config.URBAN_BINARY_DECISION_THRESHOLD)
-        base["binary_decision_threshold"] = threshold
-
-        route_reason = str(route_result.reason or "").strip()
-        if route_reason in BINARY_HARD_NEGATIVE_REASONS:
-            score = 0.02
-            binary_label = "0"
-            decision_confidence = 0.98
-            consistency_flag = self._binary_topic_consistency_flag(
-                binary_label=binary_label,
-                final_topic=final_topic,
-            )
-            base.update(
-                {
-                    "urban_probability_score": score,
-                    "binary_decision_source": "binary_hard_negative_override",
-                    "binary_decision_evidence": f"hard_negative:{route_reason}",
-                    "binary_topic_consistency_flag": consistency_flag,
-                    "binary_recall_calibration_flag": 0,
-                    "binary_recall_calibration_tier": "hard_negative",
-                    "binary_recall_calibration_reason": route_reason,
-                }
-            )
-            return binary_label, decision_confidence, int(bool(review_flag)), review_reason
-
-        family_probability = self._source_probability(base.get("family_probability_urban"), default=0.5)
-        topic_binary_probability = self._source_probability(base.get("topic_binary_probability"), default=0.5)
-        topic_vote_probability = self._topic_family_vote_probability(base, final_topic=final_topic)
-        anchor_probability, anchor_evidence = self._anchor_probability(
+        return _apply_binary_decision_helper(
+            self,
+            base,
             record=record,
-            base=base,
+            route_result=route_result,
             final_topic=final_topic,
-        )
-        llm_probability = self._llm_hint_probability(base)
-        risk_adjustment, risk_evidence = self._risk_adjustment(base)
-        decision_adjustment, decision_adjustment_evidence = self._decision_adjustment(
             decision_source=decision_source,
             decision_reason=decision_reason,
+            confidence=confidence,
+            review_flag=review_flag,
+            review_reason=review_reason,
         )
-
-        raw_score = (
-            0.40 * family_probability
-            + 0.25 * topic_binary_probability
-            + 0.20 * topic_vote_probability
-            + 0.10 * anchor_probability
-            + 0.05 * llm_probability
-            + risk_adjustment
-            + decision_adjustment
-        )
-        raw_score = round(min(max(raw_score, 0.02), 0.98), 6)
-        recall_context = self._binary_recall_context(
-            record=record,
-            base=base,
-            final_topic=final_topic,
-        )
-        score, recall_flag, recall_tier, recall_reason = self._apply_binary_recall_calibration(
-            base=base,
-            raw_score=raw_score,
-            context=recall_context,
-            final_topic=final_topic,
-            decision_source=decision_source,
-        )
-        score = round(min(max(score, 0.02), 0.98), 6)
-        binary_label = "1" if score >= threshold else "0"
-        decision_confidence = round(score if binary_label == "1" else 1.0 - score, 6)
-        consistency_flag = self._binary_topic_consistency_flag(
-            binary_label=binary_label,
-            final_topic=final_topic,
-        )
-        evidence = (
-            f"family={family_probability:.4f}*0.40;"
-            f"topic_binary={topic_binary_probability:.4f}*0.25;"
-            f"topic_vote={topic_vote_probability:.4f}*0.20;"
-            f"anchor={anchor_probability:.2f}*0.10({anchor_evidence});"
-            f"llm_hint={llm_probability:.2f}*0.05;"
-            f"risk_adjust={risk_adjustment:+.2f}({risk_evidence});"
-            f"decision_adjust={decision_adjustment:+.2f}({decision_adjustment_evidence});"
-            f"raw_score={raw_score:.6f};"
-            f"recall_calibration={recall_tier}({recall_reason})"
-        )
-        base.update(
-            {
-                "urban_probability_score": score,
-                "binary_decision_source": "binary_confidence_resolution",
-                "binary_decision_evidence": evidence,
-                "binary_topic_consistency_flag": consistency_flag,
-                "binary_recall_calibration_flag": int(bool(recall_flag)),
-                "binary_recall_calibration_tier": recall_tier,
-                "binary_recall_calibration_reason": recall_reason,
-            }
-        )
-
-        review_reasons = [item for item in str(review_reason or "").split(";") if item]
-        if decision_confidence < float(Config.URBAN_BINARY_LOW_CONFIDENCE_REVIEW_FLOOR):
-            review_reasons.append("binary_low_confidence")
-        if consistency_flag:
-            review_reasons.append("binary_topic_inconsistency")
-        review_flag = int(bool(review_flag) or bool(review_reasons))
-        review_reason = ";".join(dict.fromkeys(review_reasons))
-        return binary_label, decision_confidence, review_flag, review_reason
 
     def _merge_rule_review_signal(
         self,
@@ -2859,15 +2688,11 @@ class UrbanHybridClassifier:
         final_topic: str,
         binary_label: Optional[str],
     ) -> str:
-        if binary_label in {"0", "1"}:
-            return str(binary_label)
-        existing_label = str(base.get("final_label", "") or base.get("urban_flag", "") or "").strip()
-        if existing_label.endswith(".0"):
-            existing_label = existing_label[:-2]
-        if existing_label in {"0", "1"}:
-            return existing_label
-        topic_label = urban_flag_for_topic_label(final_topic)
-        return topic_label if topic_label in {"0", "1"} else ""
+        return _normalize_final_binary_label_helper(
+            base,
+            final_topic=final_topic,
+            binary_label=binary_label,
+        )
 
     def _resolve_binary_audit_topic(
         self,
@@ -2877,99 +2702,13 @@ class UrbanHybridClassifier:
         binary_label: str,
         decision_reason: str,
     ) -> tuple[str, str]:
-        if not bool(Config.URBAN_BINARY_AUDIT_RESOLUTION_ENABLED):
-            return final_topic, decision_reason
-
-        route_reason = str(base.get("metadata_route_reason", "") or "").strip()
-        if route_reason in BINARY_HARD_NEGATIVE_REASONS:
-            base.update(
-                {
-                    "binary_audit_resolution_flag": 0,
-                    "binary_audit_resolution_action": "hard_negative_preserved",
-                    "binary_audit_resolution_reason": route_reason,
-                    "binary_audit_resolution_evidence": route_reason,
-                }
-            )
-            return final_topic, decision_reason
-
-        topic_group = topic_group_for_label(final_topic)
-        if binary_label not in {"0", "1"}:
-            base.update(
-                {
-                    "binary_audit_resolution_flag": 0,
-                    "binary_audit_resolution_action": "missing_binary_label",
-                    "binary_audit_resolution_reason": f"topic_group={topic_group}",
-                    "binary_audit_resolution_evidence": "",
-                }
-            )
-            return final_topic, decision_reason
-
-        if binary_label == "1" and topic_group != "urban":
-            score = self._safe_float(base.get("urban_probability_score"), default=0.0)
-            threshold = self._safe_float(
-                base.get("binary_decision_threshold"),
-                default=float(Config.URBAN_BINARY_DECISION_THRESHOLD),
-            )
-            recall_tier = str(base.get("binary_recall_calibration_tier", "") or "none")
-            from_topic = final_topic or UNKNOWN_TOPIC_LABEL
-            evidence = (
-                f"from={from_topic};score={score:.4f};threshold={threshold:.4f};"
-                f"recall={recall_tier};source={base.get('binary_decision_source', '')}"
-            )
-            base.update(
-                {
-                    "binary_audit_resolution_flag": 1,
-                    "binary_audit_resolution_action": "positive_binary_conflict_audit",
-                    "binary_audit_resolution_reason": f"binary_positive_from_{from_topic}",
-                    "binary_audit_resolution_evidence": evidence,
-                }
-            )
-            decision_reason = f"{decision_reason};binary_audit_positive_conflict:{from_topic}".strip(";")
-            return final_topic, decision_reason
-
-        if binary_label == "0" and topic_group != "nonurban":
-            score = self._safe_float(base.get("urban_probability_score"), default=1.0)
-            threshold = self._safe_float(
-                base.get("binary_decision_threshold"),
-                default=float(Config.URBAN_BINARY_DECISION_THRESHOLD),
-            )
-            from_topic = final_topic or UNKNOWN_TOPIC_LABEL
-            evidence = (
-                f"from={from_topic};score={score:.4f};threshold={threshold:.4f};"
-                f"source={base.get('binary_decision_source', '')}"
-            )
-            if topic_group == UNKNOWN_TOPIC_GROUP:
-                base.update(
-                    {
-                        "binary_audit_resolution_flag": 1,
-                        "binary_audit_resolution_action": "negative_binary_conflict_audit",
-                        "binary_audit_resolution_reason": f"binary_negative_from_{from_topic}",
-                        "binary_audit_resolution_evidence": evidence,
-                    }
-                )
-                decision_reason = f"{decision_reason};binary_audit_negative_conflict:{from_topic}".strip(";")
-                return final_topic, decision_reason
-
-            base.update(
-                {
-                    "binary_audit_resolution_flag": 1,
-                    "binary_audit_resolution_action": "negative_binary_conflict_audit",
-                    "binary_audit_resolution_reason": f"binary_negative_from_{from_topic}",
-                    "binary_audit_resolution_evidence": evidence,
-                }
-            )
-            decision_reason = f"{decision_reason};binary_audit_negative_conflict:{from_topic}".strip(";")
-            return final_topic, decision_reason
-
-        base.update(
-            {
-                "binary_audit_resolution_flag": 0,
-                "binary_audit_resolution_action": "covered",
-                "binary_audit_resolution_reason": f"binary_{binary_label}_matches_{topic_group}",
-                "binary_audit_resolution_evidence": "",
-            }
+        return _resolve_binary_audit_topic_helper(
+            self,
+            base,
+            final_topic=final_topic,
+            binary_label=binary_label,
+            decision_reason=decision_reason,
         )
-        return final_topic, decision_reason
 
     def _effective_binary_topic_consistency_flag(
         self,
@@ -3257,100 +2996,14 @@ class UrbanHybridClassifier:
         review_reason: str,
         binary_label: Optional[str] = None,
     ) -> Dict[str, Any]:
-        audit_binary_label = self._normalize_final_binary_label(
+        return _build_final_result_helper(
+            self,
             base,
             final_topic=final_topic,
-            binary_label=binary_label,
-        )
-        final_topic, decision_reason = self._resolve_binary_audit_topic(
-            base,
-            final_topic=final_topic,
-            binary_label=audit_binary_label,
+            decision_source=decision_source,
             decision_reason=decision_reason,
-        )
-        topic_binary_label = urban_flag_for_topic_label(final_topic)
-        urban_flag = (
-            audit_binary_label
-            if audit_binary_label in {"0", "1"}
-            else topic_binary_label
-        )
-        review_flag, review_reason = self._reconcile_final_review_signal(
-            base,
-            final_topic=final_topic,
-            binary_label=audit_binary_label,
+            confidence=confidence,
             review_flag=review_flag,
             review_reason=review_reason,
+            binary_label=binary_label,
         )
-
-        topic_group = topic_group_for_label(final_topic)
-        topic_name = topic_name_for_label(final_topic)
-        legacy_label, legacy_group, legacy_name = legacy_topic_for_label(final_topic)
-
-        bertopic_hint_label = str(base.get("bertopic_hint_label", "") or "")
-        bertopic_conflict_flag = 0
-        if final_topic != UNKNOWN_TOPIC_LABEL and bertopic_hint_label and bertopic_hint_label != final_topic:
-            bertopic_conflict_flag = 1
-        if final_topic == UNKNOWN_TOPIC_LABEL and bertopic_hint_label:
-            bertopic_conflict_flag = 1
-
-        topic_family_final = str(base.get("topic_family_final", "") or "")
-        if final_topic != UNKNOWN_TOPIC_LABEL:
-            topic_family_final = topic_group
-        else:
-            topic_family_final = UNKNOWN_TOPIC_GROUP
-        taxonomy_status = str(base.get("taxonomy_coverage_status", "") or "")
-        if final_topic in {OPEN_SET_URBAN_LABEL, OPEN_SET_NONURBAN_LABEL}:
-            taxonomy_status = "open_set"
-            base["open_set_flag"] = 1
-            base["open_set_topic"] = final_topic
-            if not base.get("open_set_reason"):
-                base["open_set_reason"] = "open_set_topic"
-        elif final_topic == UNKNOWN_TOPIC_LABEL:
-            taxonomy_status = taxonomy_status or "unknown"
-        elif taxonomy_status not in {"hard_negative", "open_set", "binary_resolved"}:
-            taxonomy_status = "covered"
-
-        base.update(
-            {
-                Schema.IS_URBAN_RENEWAL: urban_flag,
-                "urban_flag": urban_flag,
-                "final_label": urban_flag,
-                "urban_parse_reason": decision_source,
-                "decision_source": decision_source,
-                "decision_reason": decision_reason,
-                "confidence": round(float(confidence), 4),
-                "review_flag": int(review_flag),
-                "review_reason": review_reason,
-                "legacy_topic_label": legacy_label,
-                "legacy_topic_group": legacy_group,
-                "legacy_topic_name": legacy_name,
-                "topic_final": final_topic,
-                "topic_final_group": topic_group,
-                "topic_final_name": topic_name,
-                "topic_family_final": topic_family_final,
-                "family_predicted_family": base.get("family_predicted_family") or topic_family_final,
-                "family_decision_source": base.get("family_decision_source") or decision_source,
-                "topic_within_family_label": base.get("topic_within_family_label") or (final_topic if final_topic != UNKNOWN_TOPIC_LABEL else ""),
-                "topic_label": final_topic,
-                "topic_group": topic_group,
-                "topic_name": topic_name,
-                "bertopic_hint_conflict_flag": bertopic_conflict_flag,
-                "binary_topic_consistency_flag": self._effective_binary_topic_consistency_flag(
-                    base,
-                    binary_label=urban_flag,
-                    final_topic=final_topic,
-                ),
-                "taxonomy_coverage_status": taxonomy_status,
-            }
-        )
-        base.update(
-            self._summarize_decision_explanation(
-                base,
-                final_topic=final_topic,
-                binary_label=urban_flag,
-                confidence=float(confidence),
-                decision_source=decision_source,
-                review_flag=review_flag,
-            )
-        )
-        return base

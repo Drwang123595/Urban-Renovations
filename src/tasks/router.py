@@ -21,9 +21,12 @@ from ..urban.hybrid.classifier import UrbanHybridClassifier
 from ..urban.urban_metadata import UrbanMetadataRecord
 from ..urban.topic_model.local_classifier import UrbanTopicClassifier
 from ..urban.taxonomy.core import legacy_topic_for_label, urban_flag_for_topic_label
-from ..urban.dynamic.topic_discovery import DYNAMIC_BINARY_DEFAULTS, DYNAMIC_TOPIC_DEFAULTS
-from ..urban.dynamic.binary_refinement import DynamicBinaryRefinementConfig, DynamicBinaryRefiner
-from ..urban.hybrid.binary_policy_v2 import BINARY_POLICY_V2_DEFAULTS, UrbanBinaryPolicyV2
+from ..urban.pipeline.io import (
+    build_urban_output_row,
+    build_urban_prediction_frame,
+    write_urban_prediction_checkpoint,
+)
+from ..urban.pipeline.postprocess import postprocess_urban_predictions
 
 
 class TaskType(Enum):
@@ -36,26 +39,6 @@ class UrbanMethod(Enum):
     PURE_LLM_API = "pure_llm_api"
     LOCAL_TOPIC_CLASSIFIER = "local_topic_classifier"
     THREE_STAGE_HYBRID = "three_stage_hybrid"
-
-
-URBAN_EXPLAINABILITY_CONTRACT_DEFAULTS = {
-    "decision_explanation": "",
-    "primary_positive_evidence": "",
-    "primary_negative_evidence": "",
-    "evidence_balance": "",
-    "decision_rule_stack": "",
-    "binary_decision_evidence": "",
-    "urban_probability_score": "",
-    "binary_decision_threshold": "",
-    "binary_decision_source": "",
-    "taxonomy_coverage_status": "",
-    "unknown_recovery_path": "",
-    "unknown_recovery_evidence": "",
-}
-
-URBAN_DYNAMIC_TOPIC_CONTRACT_DEFAULTS = dict(DYNAMIC_TOPIC_DEFAULTS)
-URBAN_DYNAMIC_BINARY_CONTRACT_DEFAULTS = dict(DYNAMIC_BINARY_DEFAULTS)
-URBAN_BINARY_POLICY_V2_CONTRACT_DEFAULTS = dict(BINARY_POLICY_V2_DEFAULTS)
 
 
 class TaskRouter:
@@ -164,6 +147,7 @@ class TaskRouter:
                 "order_id",
                 "order_seed",
                 "max_samples_per_window",
+                "urban_flow_audit_enabled",
             ):
                 metadata[key] = run_context.get(key)
         return metadata
@@ -232,6 +216,17 @@ class TaskRouter:
             return 100
         return 10
 
+    def _urban_flow_audit_enabled(
+        self,
+        run_context: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Return whether urban rows should carry per-row audit metadata."""
+
+        raw_value = self._run_context_value(run_context, "urban_flow_audit_enabled", True)
+        if isinstance(raw_value, bool):
+            return bool(raw_value)
+        return str(raw_value).strip().lower() not in {"0", "false", "off", "no"}
+
     def run_urban_renewal(
         self,
         input_file: str = None,
@@ -275,15 +270,17 @@ class TaskRouter:
 
             session_path = self._get_urban_session_path(task_name, index, timestamp)
             metadata = self._extract_metadata(row)
-            audit_metadata = self._build_session_audit_metadata(
-                task_type=TaskType.URBAN_RENEWAL,
-                input_path=input_path,
-                output_path=output_path,
-                strategy_name=self.urban_method.value,
-                run_id=timestamp,
-                sample_index=index,
-                run_context=run_context,
-            )
+            audit_metadata = None
+            if self._urban_flow_audit_enabled(run_context):
+                audit_metadata = self._build_session_audit_metadata(
+                    task_type=TaskType.URBAN_RENEWAL,
+                    input_path=input_path,
+                    output_path=output_path,
+                    strategy_name=self.urban_method.value,
+                    run_id=timestamp,
+                    sample_index=index,
+                    run_context=run_context,
+                )
             result = self._run_urban_method(
                 title,
                 abstract,
@@ -301,11 +298,10 @@ class TaskRouter:
             )
 
             if (index + 1) % checkpoint_interval == 0 or (index + 1) == len(df):
-                temp_df = pd.DataFrame(results_list)
-                temp_df.to_excel(output_path, index=False, engine="openpyxl")
+                write_urban_prediction_checkpoint(results_list, output_path)
 
         if results_list:
-            final_df = pd.DataFrame(results_list)
+            final_df = build_urban_prediction_frame(results_list)
             final_df = self._postprocess_urban_prediction_frame(final_df, run_context=run_context)
             final_df.to_excel(output_path, index=False, engine="openpyxl")
 
@@ -318,59 +314,13 @@ class TaskRouter:
         *,
         run_context: Optional[Dict[str, Any]] = None,
     ) -> pd.DataFrame:
-        context = run_context or {}
-        dynamic_topics_enabled = bool(context.get("dynamic_topics_enabled", False))
-        dynamic_binary_refinement_enabled = bool(context.get("dynamic_binary_refinement_enabled", False))
-
-        enriched = frame
-        if dynamic_topics_enabled or dynamic_binary_refinement_enabled:
-            try:
-                from ..urban.dynamic.topic_discovery import DynamicTopicConfig, DynamicTopicDiscovery
-
-                prefer_sklearn = not bool(context.get("dynamic_topics_keyword_fallback_only", False))
-                config = DynamicTopicConfig(
-                    min_topic_size=int(context.get("dynamic_topics_min_topic_size", 20) or 20),
-                    max_topics=int(context.get("dynamic_topics_max_topics", 60) or 60),
-                    mapping_min_score=float(context.get("dynamic_topics_mapping_min_score", 0.12) or 0.12),
-                    include_full_corpus=bool(context.get("dynamic_topics_include_full_corpus", False)),
-                    prefer_sklearn=prefer_sklearn,
-                )
-                discovery = DynamicTopicDiscovery(config)
-                enriched = discovery.enrich(
-                    enriched,
-                    include_full_corpus=bool(context.get("dynamic_topics_include_full_corpus", False)),
-                )
-            except Exception as exc:
-                print(f"[WARN] Dynamic topic enrichment failed, continuing without it: {type(exc).__name__}: {exc}")
-
-        if dynamic_binary_refinement_enabled:
-            try:
-                refiner = DynamicBinaryRefiner(DynamicBinaryRefinementConfig.from_context(context))
-                enriched = refiner.refine(enriched, mutate_final_fields=True)
-            except Exception as exc:
-                print(
-                    f"[WARN] Dynamic binary refinement failed, continuing without it: {type(exc).__name__}: {exc}"
-                )
-
-        policy_enabled = bool(context.get("urban_binary_policy_v2_enabled", True))
-        if not policy_enabled:
-            return enriched
-
-        try:
-            experiment_track = str(context.get("experiment_track") or "").strip()
-            llm_adjudication_enabled = (
-                experiment_track == "research_matrix"
-                and bool(context.get("hybrid_llm_assist_enabled", self.hybrid_llm_assist_enabled))
-                and self.urban_method == UrbanMethod.THREE_STAGE_HYBRID
-            )
-            policy = UrbanBinaryPolicyV2(
-                llm_client=self.urban_client,
-                llm_enabled=llm_adjudication_enabled,
-            )
-            return policy.apply(enriched)
-        except Exception as exc:
-            print(f"[WARN] Urban binary policy V2 failed, continuing without it: {type(exc).__name__}: {exc}")
-            return enriched
+        return postprocess_urban_predictions(
+            frame,
+            run_context=run_context,
+            llm_client=self.urban_client,
+            hybrid_llm_assist_enabled=self.hybrid_llm_assist_enabled,
+            urban_method=self.urban_method,
+        )
 
     def _run_urban_method(
         self,
@@ -710,199 +660,7 @@ class TaskRouter:
         abstract: str,
         result: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        result = result or {}
-        urban_label = result.get(Schema.IS_URBAN_RENEWAL, "0")
-        if urban_label in (None, ""):
-            urban_label = result.get("final_label", "0")
-        urban_label = "0" if urban_label in (None, "") else str(urban_label)
-        urban_flag = result.get("urban_flag", urban_label)
-        urban_flag = urban_label if urban_flag in (None, "") else urban_flag
-        output = {
-            Schema.TITLE: title,
-            Schema.ABSTRACT: abstract,
-            Schema.IS_URBAN_RENEWAL: urban_label,
-            "urban_flag": urban_flag,
-            "urban_parse_reason": result.get("urban_parse_reason", "missing_parse_reason"),
-        }
-        for column in [
-            "final_label",
-            "confidence",
-            "metadata_route",
-            "metadata_route_reason",
-            "metadata_candidate_topic_buckets",
-            "metadata_candidate_matches",
-            "llm_used",
-            "llm_attempted",
-            "llm_failure_reason",
-            Schema.AUTHOR_KEYWORDS,
-            Schema.KEYWORDS_PLUS,
-            Schema.KEYWORDS,
-            Schema.WOS_CATEGORIES,
-            Schema.RESEARCH_AREAS,
-            "metadata_filter_result",
-            "metadata_filter_reason",
-            "metadata_positive_signals",
-            "stage1_decision",
-            "stage1_reason_tag",
-            "stage1_hit_signals",
-            "stage1_risk_tags",
-            "stage1_conflict_flag",
-            "metadata_negative_domains",
-            "metadata_negative_keywords",
-            "metadata_related_domains",
-            "topic_rule",
-            "topic_rule_group",
-            "topic_rule_name",
-            "topic_rule_score",
-            "topic_rule_margin",
-            "topic_rule_top3",
-            "topic_rule_matches",
-            "review_flag_rule",
-            "review_reason_rule",
-            "review_flag",
-            "review_reason",
-            "llm_family_hint",
-            "llm_family_hint_reason",
-            "legacy_topic_label",
-            "legacy_topic_group",
-            "legacy_topic_name",
-            "topic_local_label",
-            "topic_local_group",
-            "topic_local_name",
-            "topic_local_confidence",
-            "topic_local_margin",
-            "topic_local_top3",
-            "topic_final",
-            "topic_final_group",
-            "topic_final_name",
-            "topic_label",
-            "topic_group",
-            "topic_name",
-            "topic_confidence",
-            "topic_margin",
-            "topic_confidence_effective",
-            "topic_margin_effective",
-            "topic_matches",
-            "topic_binary_score",
-            "topic_binary_probability",
-            "bertopic_status",
-            "bertopic_topic_id",
-            "bertopic_topic_name",
-            "bertopic_probability",
-            "bertopic_is_outlier",
-            "bertopic_count",
-            "bertopic_pos_rate",
-            "bertopic_mapped_label",
-            "bertopic_mapped_group",
-            "bertopic_mapped_name",
-            "bertopic_label_purity",
-            "bertopic_mapped_label_share",
-            "bertopic_top_terms",
-            "bertopic_sample_titles",
-            "bertopic_source_split",
-            "bertopic_high_purity",
-            "bertopic_true_outlier",
-            "bertopic_prior_mode",
-            "bertopic_confidence_delta",
-            "bertopic_margin_delta",
-            "bertopic_hint_label",
-            "bertopic_hint_group",
-            "bertopic_hint_name",
-            "bertopic_hint_conflict_flag",
-            "bertopic_cluster_quality",
-            "bertopic_dynamic_topic_id",
-            "bertopic_dynamic_topic_words",
-            "bertopic_primary_label",
-            "bertopic_primary_group",
-            "bertopic_primary_name",
-            "bertopic_primary_probability",
-            "bertopic_primary_support",
-            "bertopic_primary_purity",
-            "bertopic_primary_mapped_share",
-            "bertopic_primary_override",
-            "bertopic_primary_reason",
-            "topic_family_rule",
-            "topic_family_local",
-            "topic_family_final",
-            "family_predicted_family",
-            "family_decision_source",
-            "family_confidence",
-            "family_probability_urban",
-            "topic_within_family_label",
-            "topic_family_within_score",
-            "topic_family_within_margin",
-            "boundary_bucket",
-            "family_conflict_pattern",
-            "unknown_recovery_path",
-            "unknown_recovery_evidence",
-            "anchor_guard_flag",
-            "anchor_guard_action",
-            "anchor_guard_reason",
-            "anchor_guard_hits",
-            "uncertain_nonurban_guard_flag",
-            "uncertain_nonurban_guard_action",
-            "uncertain_nonurban_guard_reason",
-            "uncertain_nonurban_guard_evidence",
-            "urban_probability_score",
-            "binary_decision_threshold",
-            "binary_decision_source",
-            "binary_decision_evidence",
-            "binary_topic_consistency_flag",
-            "binary_recall_calibration_flag",
-            "binary_recall_calibration_tier",
-            "binary_recall_calibration_reason",
-            "binary_audit_resolution_flag",
-            "binary_audit_resolution_action",
-            "binary_audit_resolution_reason",
-            "binary_audit_resolution_evidence",
-            "review_flag_raw",
-            "review_reason_raw",
-            "open_set_flag",
-            "open_set_topic",
-            "open_set_reason",
-            "open_set_evidence",
-            "taxonomy_coverage_status",
-            "decision_explanation",
-            "primary_positive_evidence",
-            "primary_negative_evidence",
-            "evidence_balance",
-            "decision_rule_stack",
-            "dynamic_topic_id",
-            "dynamic_topic_name_zh",
-            "dynamic_topic_keywords",
-            "dynamic_topic_size",
-            "dynamic_topic_confidence",
-            "dynamic_topic_source_pool",
-            "dynamic_to_fixed_topic_candidate",
-            "dynamic_mapping_status",
-            "dynamic_binary_candidate_label",
-            "dynamic_binary_candidate_confidence",
-            "dynamic_binary_candidate_action",
-            "dynamic_binary_candidate_reason",
-            "dynamic_binary_review_priority",
-            "binary_policy_action",
-            "binary_policy_reason",
-            "binary_policy_conflict_type",
-            "llm_adjudication_required",
-            "llm_adjudication_label",
-            "llm_adjudication_confidence",
-            "llm_adjudication_reason",
-            "decision_source",
-            "decision_reason",
-        ]:
-            if column in result:
-                output[column] = result[column]
-        for column, default_value in URBAN_EXPLAINABILITY_CONTRACT_DEFAULTS.items():
-            output.setdefault(column, default_value)
-        for column, default_value in URBAN_DYNAMIC_TOPIC_CONTRACT_DEFAULTS.items():
-            output.setdefault(column, default_value)
-        for column, default_value in URBAN_DYNAMIC_BINARY_CONTRACT_DEFAULTS.items():
-            output.setdefault(column, default_value)
-        for column, default_value in URBAN_BINARY_POLICY_V2_CONTRACT_DEFAULTS.items():
-            output.setdefault(column, default_value)
-        if "final_label" in output and output.get("final_label") in (None, ""):
-            output["final_label"] = urban_label
-        return output
+        return build_urban_output_row(title, abstract, result)
 
     def _build_spatial_output_row(
         self,

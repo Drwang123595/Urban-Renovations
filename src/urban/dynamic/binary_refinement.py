@@ -30,6 +30,26 @@ DYNAMIC_BINARY_REFINEMENT_COLUMNS = [
     "dynamic_binary_override_source",
 ]
 
+DYNAMIC_BINARY_FINAL_MUTATION_FIELDS = {
+    Schema.IS_URBAN_RENEWAL,
+    "urban_flag",
+    "final_label",
+    "topic_final",
+    "topic_final_group",
+    "topic_final_name",
+    "topic_label",
+    "topic_group",
+    "topic_name",
+    "legacy_topic_label",
+    "legacy_topic_group",
+    "legacy_topic_name",
+    "taxonomy_coverage_status",
+    "binary_decision_source",
+    "decision_source",
+    "decision_explanation",
+    "binary_decision_evidence",
+}
+
 
 def _normalize_binary_label(value: Any) -> str:
     if value is None:
@@ -157,6 +177,18 @@ class DynamicBinaryRefinementConfig:
         )
 
 
+@dataclass(frozen=True)
+class DynamicBinaryCandidateContext:
+    """Precomputed series used by dynamic binary refinement."""
+
+    candidate_norm: pd.Series
+    topic_confidence: pd.Series
+    topic_size: pd.Series
+    current_norm: pd.Series
+    unknown_mask: pd.Series
+    conflict_mask: pd.Series
+
+
 class DynamicBinaryRefiner:
     """Deterministic binary refinement driven by dynamic topic evidence.
 
@@ -183,6 +215,26 @@ class DynamicBinaryRefiner:
 
         mutate = cfg.mutate_final_fields if mutate_final_fields is None else bool(mutate_final_fields)
 
+        working = self._prepare_working_frame(frame)
+
+        context = self._build_candidate_context(working)
+        target_mask = self._build_target_mask(working, context)
+        target_mask = self._apply_positive_anchor_constraints(working, target_mask, context)
+
+        if not bool(target_mask.any()):
+            return working
+
+        self._apply_overrides(
+            working,
+            target_mask,
+            context,
+            mutate_final_fields=mutate,
+        )
+        return working
+
+    def _prepare_working_frame(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Copy the frame and normalize columns that may receive overrides."""
+
         working = frame.copy()
         for column in DYNAMIC_BINARY_REFINEMENT_COLUMNS:
             if column not in working.columns:
@@ -193,27 +245,13 @@ class DynamicBinaryRefiner:
         # Pandas 2.2+ becomes strict about dtype upcasting (e.g. int -> str).
         # The refinement step may write string labels into these columns, so
         # keep them as object for robustness even when the frame is loaded from Excel.
-        for col in (
-            Schema.IS_URBAN_RENEWAL,
-            "urban_flag",
-            "final_label",
-            "topic_final",
-            "topic_final_group",
-            "topic_final_name",
-            "topic_label",
-            "topic_group",
-            "topic_name",
-            "legacy_topic_label",
-            "legacy_topic_group",
-            "legacy_topic_name",
-            "taxonomy_coverage_status",
-            "binary_decision_source",
-            "decision_source",
-            "decision_explanation",
-            "binary_decision_evidence",
-        ):
+        for col in DYNAMIC_BINARY_FINAL_MUTATION_FIELDS:
             if col in working.columns:
                 working[col] = working[col].astype(object)
+        return working
+
+    def _build_candidate_context(self, working: pd.DataFrame) -> DynamicBinaryCandidateContext:
+        """Precompute candidate labels and masks shared by refinement stages."""
 
         candidate_label_series = working.get("dynamic_binary_candidate_label", pd.Series([""] * len(working)))
         candidate_label_series = candidate_label_series.fillna("").astype(str).str.strip()
@@ -234,14 +272,6 @@ class DynamicBinaryRefiner:
         current_norm = current_label_series.apply(_normalize_binary_label)
         candidate_norm = candidate_label_series.apply(_normalize_binary_label)
 
-        eligible = (
-            candidate_norm.isin({"0", "1"})
-            & (topic_confidence_series >= float(cfg.min_topic_confidence))
-            & (topic_size_series >= int(cfg.min_topic_size))
-        )
-        if not bool(eligible.any()):
-            return working
-
         topic_final_series = working.get("topic_final", pd.Series([""] * len(working), index=working.index, dtype=object))
         taxonomy_status_series = working.get(
             "taxonomy_coverage_status",
@@ -252,20 +282,46 @@ class DynamicBinaryRefiner:
 
         unknown_mask = (~current_norm.isin({"0", "1"})) | topic_unknown | taxonomy_unknown
         conflict_mask = current_norm.isin({"0", "1"}) & (candidate_norm != current_norm) & (~unknown_mask)
+        return DynamicBinaryCandidateContext(
+            candidate_norm=candidate_norm,
+            topic_confidence=topic_confidence_series,
+            topic_size=topic_size_series,
+            current_norm=current_norm,
+            unknown_mask=unknown_mask,
+            conflict_mask=conflict_mask,
+        )
+
+    def _build_target_mask(
+        self,
+        working: pd.DataFrame,
+        context: DynamicBinaryCandidateContext,
+    ) -> pd.Series:
+        """Select rows eligible for dynamic binary overrides."""
+
+        cfg = self.config
+        eligible = (
+            context.candidate_norm.isin({"0", "1"})
+            & (context.topic_confidence >= float(cfg.min_topic_confidence))
+            & (context.topic_size >= int(cfg.min_topic_size))
+        )
+        if not bool(eligible.any()):
+            return pd.Series(False, index=working.index, dtype=bool)
 
         if cfg.unknown_only:
-            target_mask = eligible & unknown_mask
+            target_mask = eligible & context.unknown_mask
         else:
-            target_mask = eligible & (unknown_mask | (conflict_mask if cfg.allow_flip_existing else False))
+            target_mask = eligible & (
+                context.unknown_mask | (context.conflict_mask if cfg.allow_flip_existing else False)
+            )
 
         if not bool(target_mask.any()):
-            return working
+            return target_mask
 
         # Dynamic topics are allowed to increase recall (0->1) or resolve
         # unlabeled rows, but they must not reduce recall by flipping an
         # existing binary positive to 0. This applies even when topic_final is
         # Unknown; the binary decision is the final contract.
-        negative_flip = (candidate_norm == "0") & (current_norm == "1")
+        negative_flip = (context.candidate_norm == "0") & (context.current_norm == "1")
         target_mask = target_mask & (~negative_flip)
 
         if cfg.allow_flip_existing and cfg.require_review_flag_for_flip:
@@ -281,13 +337,21 @@ class DynamicBinaryRefiner:
             threshold = threshold.fillna(float(threshold.median()) if threshold.notna().any() else 0.5)
             near_threshold = (score - threshold).abs() <= float(cfg.near_threshold_margin)
             flip_gate = (review_flag > 0) | near_threshold
-            target_mask = target_mask & (unknown_mask | (~unknown_mask & flip_gate))
+            target_mask = target_mask & (context.unknown_mask | (~context.unknown_mask & flip_gate))
+        return target_mask
+
+    def _apply_positive_anchor_constraints(
+        self,
+        working: pd.DataFrame,
+        target_mask: pd.Series,
+        context: DynamicBinaryCandidateContext,
+    ) -> pd.Series:
+        """Keep positive dynamic overrides behind the existing anchor gates."""
 
         if not bool(target_mask.any()):
-            return working
-
-        if cfg.require_anchor_for_positive:
-            positive_mask = target_mask & (candidate_norm == "1")
+            return target_mask
+        if self.config.require_anchor_for_positive:
+            positive_mask = target_mask & (context.candidate_norm == "1")
             if bool(positive_mask.any()):
                 uncertain_action = (
                     working.get(
@@ -312,8 +376,8 @@ class DynamicBinaryRefiner:
                 # For existing 0->1 flips, allow additional gates:
                 # - uncertain_nonurban_guard_action=keep_0 (high precision in eval)
                 # - uncertain_nonurban_guard_action=review + common renewal anchor
-                current_pos = current_norm.loc[positive_mask]
-                unknown_pos = unknown_mask.loc[positive_mask]
+                current_pos = context.current_norm.loc[positive_mask]
+                unknown_pos = context.unknown_mask.loc[positive_mask]
                 action_pos = uncertain_action.loc[positive_mask]
 
                 positive_allow = unknown_pos & core_anchor & (~rural_anchor)
@@ -334,10 +398,18 @@ class DynamicBinaryRefiner:
 
                 allowed = pd.Series(False, index=working.index, dtype=bool)
                 allowed.loc[positive_mask] = positive_allow
-                target_mask = target_mask & ((candidate_norm != "1") | allowed)
+                target_mask = target_mask & ((context.candidate_norm != "1") | allowed)
+        return target_mask
 
-        if not bool(target_mask.any()):
-            return working
+    def _apply_overrides(
+        self,
+        working: pd.DataFrame,
+        target_mask: pd.Series,
+        context: DynamicBinaryCandidateContext,
+        *,
+        mutate_final_fields: bool,
+    ) -> None:
+        """Record dynamic override evidence and optionally mutate final fields."""
 
         dynamic_topic_id = working.get("dynamic_topic_id", pd.Series([""] * len(working))).fillna("").astype(str).str.strip()
         mapping_status = working.get("dynamic_mapping_status", pd.Series([""] * len(working))).fillna("").astype(str).str.strip()
@@ -345,7 +417,7 @@ class DynamicBinaryRefiner:
         binary_action = working.get("dynamic_binary_candidate_action", pd.Series([""] * len(working))).fillna("").astype(str).str.strip()
 
         for idx in working.index[target_mask]:
-            cand_label = str(candidate_norm.loc[idx] or "").strip()
+            cand_label = str(context.candidate_norm.loc[idx] or "").strip()
             if cand_label not in {"0", "1"}:
                 continue
 
@@ -360,12 +432,12 @@ class DynamicBinaryRefiner:
                 if cand_label == "0" and group != "nonurban":
                     candidate_topic = OPEN_SET_NONURBAN_LABEL
 
-            confidence = float(topic_confidence_series.loc[idx])
-            size = int(topic_size_series.loc[idx])
+            confidence = float(context.topic_confidence.loc[idx])
+            size = int(context.topic_size.loc[idx])
             source = "dynamic_topic_refiner"
-            if unknown_mask.loc[idx]:
+            if context.unknown_mask.loc[idx]:
                 source = "dynamic_topic_refiner_unknown"
-            elif conflict_mask.loc[idx]:
+            elif context.conflict_mask.loc[idx]:
                 source = "dynamic_topic_refiner_flip"
 
             reason = (
@@ -375,69 +447,107 @@ class DynamicBinaryRefiner:
                 f"topic_size={size}; topic_confidence={confidence:.6f}"
             )
 
-            working.at[idx, "dynamic_binary_override_applied"] = 1
-            working.at[idx, "dynamic_binary_override_label"] = cand_label
-            working.at[idx, "dynamic_binary_override_topic"] = candidate_topic
-            working.at[idx, "dynamic_binary_override_reason"] = reason
-            working.at[idx, "dynamic_binary_override_source"] = source
+            self._record_override_evidence(
+                working,
+                idx,
+                candidate_label=cand_label,
+                candidate_topic=candidate_topic,
+                reason=reason,
+                source=source,
+            )
 
-            if not mutate:
-                continue
+            if mutate_final_fields:
+                self._mutate_final_fields(
+                    working,
+                    idx,
+                    candidate_label=cand_label,
+                    candidate_topic=candidate_topic,
+                    source=source,
+                    dynamic_topic_id=str(dynamic_topic_id.loc[idx]),
+                )
 
-            previous_topic = str(working.at[idx, "topic_final"]) if "topic_final" in working.columns else ""
-            previous_source = str(working.at[idx, "binary_decision_source"]) if "binary_decision_source" in working.columns else ""
+    def _record_override_evidence(
+        self,
+        working: pd.DataFrame,
+        idx: Any,
+        *,
+        candidate_label: str,
+        candidate_topic: str,
+        reason: str,
+        source: str,
+    ) -> None:
+        """Record dynamic binary evidence without touching final decision fields."""
 
-            working.at[idx, Schema.IS_URBAN_RENEWAL] = cand_label
-            if "urban_flag" in working.columns:
-                working.at[idx, "urban_flag"] = cand_label
-            if "final_label" in working.columns:
-                working.at[idx, "final_label"] = cand_label
+        working.at[idx, "dynamic_binary_override_applied"] = 1
+        working.at[idx, "dynamic_binary_override_label"] = candidate_label
+        working.at[idx, "dynamic_binary_override_topic"] = candidate_topic
+        working.at[idx, "dynamic_binary_override_reason"] = reason
+        working.at[idx, "dynamic_binary_override_source"] = source
 
-            if "topic_final" in working.columns:
-                working.at[idx, "topic_final"] = candidate_topic
-            if "topic_final_group" in working.columns:
-                working.at[idx, "topic_final_group"] = topic_group_for_label(candidate_topic)
-            if "topic_final_name" in working.columns:
-                working.at[idx, "topic_final_name"] = topic_name_for_label(candidate_topic)
-            if "topic_label" in working.columns:
-                working.at[idx, "topic_label"] = candidate_topic
-            if "topic_group" in working.columns:
-                working.at[idx, "topic_group"] = topic_group_for_label(candidate_topic)
-            if "topic_name" in working.columns:
-                working.at[idx, "topic_name"] = topic_name_for_label(candidate_topic)
+    def _mutate_final_fields(
+        self,
+        working: pd.DataFrame,
+        idx: Any,
+        *,
+        candidate_label: str,
+        candidate_topic: str,
+        source: str,
+        dynamic_topic_id: str,
+    ) -> None:
+        """Apply the explicit final-field mutation allowed by the batch policy."""
 
-            if "legacy_topic_label" in working.columns:
-                legacy_label, legacy_group, legacy_name = legacy_topic_for_label(candidate_topic)
-                working.at[idx, "legacy_topic_label"] = legacy_label
-                if "legacy_topic_group" in working.columns:
-                    working.at[idx, "legacy_topic_group"] = legacy_group
-                if "legacy_topic_name" in working.columns:
-                    working.at[idx, "legacy_topic_name"] = legacy_name
+        previous_topic = str(working.at[idx, "topic_final"]) if "topic_final" in working.columns else ""
+        previous_source = str(working.at[idx, "binary_decision_source"]) if "binary_decision_source" in working.columns else ""
 
-            if "taxonomy_coverage_status" in working.columns:
-                if candidate_topic in {OPEN_SET_URBAN_LABEL, OPEN_SET_NONURBAN_LABEL}:
-                    working.at[idx, "taxonomy_coverage_status"] = "open_set"
-                elif candidate_topic != UNKNOWN_TOPIC_LABEL:
-                    working.at[idx, "taxonomy_coverage_status"] = "binary_resolved"
+        working.at[idx, Schema.IS_URBAN_RENEWAL] = candidate_label
+        if "urban_flag" in working.columns:
+            working.at[idx, "urban_flag"] = candidate_label
+        if "final_label" in working.columns:
+            working.at[idx, "final_label"] = candidate_label
 
-            if "binary_decision_source" in working.columns:
-                joined = "|".join(part for part in [previous_source, source] if part)
-                working.at[idx, "binary_decision_source"] = joined or source
+        if "topic_final" in working.columns:
+            working.at[idx, "topic_final"] = candidate_topic
+        if "topic_final_group" in working.columns:
+            working.at[idx, "topic_final_group"] = topic_group_for_label(candidate_topic)
+        if "topic_final_name" in working.columns:
+            working.at[idx, "topic_final_name"] = topic_name_for_label(candidate_topic)
+        if "topic_label" in working.columns:
+            working.at[idx, "topic_label"] = candidate_topic
+        if "topic_group" in working.columns:
+            working.at[idx, "topic_group"] = topic_group_for_label(candidate_topic)
+        if "topic_name" in working.columns:
+            working.at[idx, "topic_name"] = topic_name_for_label(candidate_topic)
 
-            if "decision_source" in working.columns:
-                prior = str(working.at[idx, "decision_source"] or "")
-                joined = "|".join(part for part in [prior, source] if part)
-                working.at[idx, "decision_source"] = joined or source
+        if "legacy_topic_label" in working.columns:
+            legacy_label, legacy_group, legacy_name = legacy_topic_for_label(candidate_topic)
+            working.at[idx, "legacy_topic_label"] = legacy_label
+            if "legacy_topic_group" in working.columns:
+                working.at[idx, "legacy_topic_group"] = legacy_group
+            if "legacy_topic_name" in working.columns:
+                working.at[idx, "legacy_topic_name"] = legacy_name
 
-            if "decision_explanation" in working.columns:
-                prior = str(working.at[idx, "decision_explanation"] or "")
-                suffix = f"; dynamic_refine={source}; topic={candidate_topic}; prev_topic={previous_topic}"
-                working.at[idx, "decision_explanation"] = f"{prior}{suffix}" if prior else suffix.lstrip("; ").strip()
+        if "taxonomy_coverage_status" in working.columns:
+            if candidate_topic in {OPEN_SET_URBAN_LABEL, OPEN_SET_NONURBAN_LABEL}:
+                working.at[idx, "taxonomy_coverage_status"] = "open_set"
+            elif candidate_topic != UNKNOWN_TOPIC_LABEL:
+                working.at[idx, "taxonomy_coverage_status"] = "binary_resolved"
 
-            if "binary_decision_evidence" in working.columns:
-                prior = str(working.at[idx, "binary_decision_evidence"] or "")
-                note = f"dynamic_refine={dynamic_topic_id.loc[idx]}:{candidate_topic}"
-                joined = "; ".join(part for part in [prior, note] if part)
-                working.at[idx, "binary_decision_evidence"] = joined
+        if "binary_decision_source" in working.columns:
+            joined = "|".join(part for part in [previous_source, source] if part)
+            working.at[idx, "binary_decision_source"] = joined or source
 
-        return working
+        if "decision_source" in working.columns:
+            prior = str(working.at[idx, "decision_source"] or "")
+            joined = "|".join(part for part in [prior, source] if part)
+            working.at[idx, "decision_source"] = joined or source
+
+        if "decision_explanation" in working.columns:
+            prior = str(working.at[idx, "decision_explanation"] or "")
+            suffix = f"; dynamic_refine={source}; topic={candidate_topic}; prev_topic={previous_topic}"
+            working.at[idx, "decision_explanation"] = f"{prior}{suffix}" if prior else suffix.lstrip("; ").strip()
+
+        if "binary_decision_evidence" in working.columns:
+            prior = str(working.at[idx, "binary_decision_evidence"] or "")
+            note = f"dynamic_refine={dynamic_topic_id}:{candidate_topic}"
+            joined = "; ".join(part for part in [prior, note] if part)
+            working.at[idx, "binary_decision_evidence"] = joined

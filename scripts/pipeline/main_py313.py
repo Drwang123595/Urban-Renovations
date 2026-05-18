@@ -540,6 +540,7 @@ def build_run_context(
     dynamic_binary_refinement_enabled: bool,
     dynamic_binary_refinement_unknown_only: bool,
     dynamic_binary_refinement_allow_flip: bool,
+    urban_flow_audit_enabled: bool,
 ) -> dict:
     return {
         "experiment_track": experiment_track,
@@ -557,6 +558,7 @@ def build_run_context(
         "dynamic_binary_refinement_enabled": bool(dynamic_binary_refinement_enabled),
         "dynamic_binary_refinement_unknown_only": bool(dynamic_binary_refinement_unknown_only),
         "dynamic_binary_refinement_allow_flip": bool(dynamic_binary_refinement_allow_flip),
+        "urban_flow_audit_enabled": bool(urban_flow_audit_enabled),
     }
 
 
@@ -951,6 +953,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Allow refining already-0/1 labels when near-threshold or review-triggered",
     )
     parser.add_argument(
+        "--urban-flow-audit",
+        choices=["on", "off"],
+        default=None,
+        help="Enable or disable per-row urban flow audit metadata (default: on)",
+    )
+    parser.add_argument(
         "--allow-candidate",
         action="store_true",
         help="Allow candidate prompt strategies for experiment runs",
@@ -1148,6 +1156,7 @@ def build_execution_context(args, input_path: Path):
 
     dynamic_topics_enabled = _resolve_toggle(args.dynamic_topics, default=False)
     dynamic_binary_refinement_enabled = _resolve_toggle(args.dynamic_binary_refine, default=False)
+    urban_flow_audit_enabled = _resolve_toggle(args.urban_flow_audit, default=True)
     if dynamic_binary_refinement_enabled:
         dynamic_topics_enabled = True
 
@@ -1174,6 +1183,7 @@ def build_execution_context(args, input_path: Path):
         dynamic_binary_refinement_enabled=dynamic_binary_refinement_enabled,
         dynamic_binary_refinement_unknown_only=bool(dynamic_binary_unknown_only),
         dynamic_binary_refinement_allow_flip=bool(dynamic_binary_allow_flip),
+        urban_flow_audit_enabled=bool(urban_flow_audit_enabled),
     )
     return dataset_id, truth_file, session_policy, run_context
 
