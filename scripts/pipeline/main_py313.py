@@ -2,6 +2,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -15,6 +17,7 @@ from src.prompting.manifest import (
 from src.prompting.strategy_registry import PromptStrategyDefinition, PromptStrategyRegistry
 from src.runtime.config import Config
 from src.tasks.task_router import TaskRouter, TaskType, UrbanMethod
+from src.urban.hybrid.binary_finalizer import summarize_llm_binary_v2
 
 
 TASK_THEME_MAP = {
@@ -541,6 +544,7 @@ def build_run_context(
     dynamic_binary_refinement_unknown_only: bool,
     dynamic_binary_refinement_allow_flip: bool,
     urban_flow_audit_enabled: bool,
+    urban_binary_workflow_version: str,
 ) -> dict:
     return {
         "experiment_track": experiment_track,
@@ -559,6 +563,7 @@ def build_run_context(
         "dynamic_binary_refinement_unknown_only": bool(dynamic_binary_refinement_unknown_only),
         "dynamic_binary_refinement_allow_flip": bool(dynamic_binary_refinement_allow_flip),
         "urban_flow_audit_enabled": bool(urban_flow_audit_enabled),
+        "urban_binary_workflow_version": str(urban_binary_workflow_version or "stable_v1"),
     }
 
 
@@ -567,6 +572,18 @@ def _manifest_context_for_output(run_context: dict, pred_scope: str) -> dict:
         **run_context,
         "pred_scope": pred_scope,
     }
+
+
+def _runtime_context_for_output(path: Path | str, base_context: dict) -> dict:
+    runtime_context = dict(base_context)
+    try:
+        output_path = Path(path)
+        if output_path.exists():
+            frame = pd.read_excel(output_path, engine="openpyxl")
+            runtime_context.update(summarize_llm_binary_v2(frame))
+    except Exception as exc:
+        runtime_context["llm_binary_v2_summary_error"] = f"{type(exc).__name__}: {exc}"
+    return runtime_context
 
 
 def write_manifests_for_results(
@@ -605,7 +622,7 @@ def write_manifests_for_results(
             registry_path=REGISTRY_PATH,
             strategy_snapshots={"urban_renewal": urban_snapshot},
             experiment_context=_manifest_context_for_output(run_context, "urban_renewal"),
-            runtime_context=runtime_context,
+            runtime_context=_runtime_context_for_output(results, runtime_context),
         )
         write_prompt_manifest(results, manifest)
         return
@@ -618,7 +635,7 @@ def write_manifests_for_results(
             registry_path=REGISTRY_PATH,
             strategy_snapshots={"spatial": spatial_snapshot},
             experiment_context=_manifest_context_for_output(run_context, "spatial"),
-            runtime_context=runtime_context,
+            runtime_context=_runtime_context_for_output(results, runtime_context),
         )
         write_prompt_manifest(results, manifest)
         return
@@ -630,7 +647,7 @@ def write_manifests_for_results(
         registry_path=REGISTRY_PATH,
         strategy_snapshots={"urban_renewal": urban_snapshot},
         experiment_context=_manifest_context_for_output(run_context, "urban_renewal"),
-        runtime_context=runtime_context,
+        runtime_context=_runtime_context_for_output(results["urban_renewal"], runtime_context),
     )
     spatial_manifest = build_run_prompt_manifest(
         task_mode=task_mode.value,
@@ -639,7 +656,7 @@ def write_manifests_for_results(
         registry_path=REGISTRY_PATH,
         strategy_snapshots={"spatial": spatial_snapshot},
         experiment_context=_manifest_context_for_output(run_context, "spatial"),
-        runtime_context=runtime_context,
+        runtime_context=_runtime_context_for_output(results["spatial"], runtime_context),
     )
     merged_manifest = build_run_prompt_manifest(
         task_mode=task_mode.value,
@@ -651,7 +668,7 @@ def write_manifests_for_results(
             "spatial": spatial_snapshot,
         },
         experiment_context=_manifest_context_for_output(run_context, "merged"),
-        runtime_context=runtime_context,
+        runtime_context=_runtime_context_for_output(results["merged"], runtime_context),
     )
     write_prompt_manifest(results["urban_renewal"], urban_manifest)
     write_prompt_manifest(results["spatial"], spatial_manifest)
@@ -959,6 +976,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Enable or disable per-row urban flow audit metadata (default: on)",
     )
     parser.add_argument(
+        "--urban-binary-workflow",
+        choices=["stable_v1", "llm_binary_v2"],
+        default="stable_v1",
+        help="Urban binary finalization workflow (default: stable_v1; llm_binary_v2 is experimental)",
+    )
+    parser.add_argument(
         "--allow-candidate",
         action="store_true",
         help="Allow candidate prompt strategies for experiment runs",
@@ -1184,6 +1207,7 @@ def build_execution_context(args, input_path: Path):
         dynamic_binary_refinement_unknown_only=bool(dynamic_binary_unknown_only),
         dynamic_binary_refinement_allow_flip=bool(dynamic_binary_allow_flip),
         urban_flow_audit_enabled=bool(urban_flow_audit_enabled),
+        urban_binary_workflow_version=args.urban_binary_workflow,
     )
     return dataset_id, truth_file, session_policy, run_context
 

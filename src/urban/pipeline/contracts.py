@@ -6,6 +6,7 @@ from typing import Any
 
 from ...runtime.config import Schema
 from ..dynamic.topic_discovery import DYNAMIC_BINARY_DEFAULTS, DYNAMIC_TOPIC_DEFAULTS
+from ..hybrid.binary_finalizer import LLM_BINARY_V2_DEFAULTS
 from ..hybrid.binary_policy_v2 import BINARY_POLICY_V2_DEFAULTS
 from ..strategy import STABLE_STRATEGY_DEFAULTS, STRATEGY_V3_DEFAULTS
 
@@ -28,6 +29,7 @@ EXPLAINABILITY_DEFAULTS: dict[str, Any] = {
 DYNAMIC_TOPIC_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(DYNAMIC_TOPIC_DEFAULTS)
 DYNAMIC_BINARY_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(DYNAMIC_BINARY_DEFAULTS)
 BINARY_POLICY_V2_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(BINARY_POLICY_V2_DEFAULTS)
+LLM_BINARY_V2_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(LLM_BINARY_V2_DEFAULTS)
 STABLE_STRATEGY_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(STABLE_STRATEGY_DEFAULTS)
 STRATEGY_V3_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(STRATEGY_V3_DEFAULTS)
 
@@ -196,9 +198,25 @@ URBAN_RESULT_COLUMNS = [
     "binary_policy_reason",
     "binary_policy_conflict_type",
     "llm_adjudication_required",
+    "pre_llm_label",
+    "pre_llm_score",
+    "pre_llm_decision_source",
+    "pre_llm_decision_reason",
+    "llm_triage_action",
+    "llm_triage_reasons",
+    "llm_adjudication_attempted",
+    "llm_adjudication_used",
+    "llm_adjudication_status",
     "llm_adjudication_label",
     "llm_adjudication_confidence",
+    "llm_adjudication_decision_type",
     "llm_adjudication_reason",
+    "llm_adjudication_evidence",
+    "llm_adjudication_failure_reason",
+    "llm_adjudication_prompt_version",
+    "binary_final_score",
+    "binary_final_source",
+    "binary_final_reason",
     "strategy_label",
     "strategy_topic",
     "strategy_status",
@@ -223,6 +241,7 @@ OUTPUT_DEFAULT_GROUPS = (
     DYNAMIC_TOPIC_DEFAULTS_FOR_OUTPUT,
     DYNAMIC_BINARY_DEFAULTS_FOR_OUTPUT,
     BINARY_POLICY_V2_DEFAULTS_FOR_OUTPUT,
+    LLM_BINARY_V2_DEFAULTS_FOR_OUTPUT,
     STABLE_STRATEGY_DEFAULTS_FOR_OUTPUT,
     STRATEGY_V3_DEFAULTS_FOR_OUTPUT,
 )

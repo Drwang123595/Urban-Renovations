@@ -59,6 +59,18 @@ strategies:
     lifecycle: deprecated
     owner: system
     change_summary: Moved legacy reflection prompt under the governed registry and removed it from runnable prompt options.
+  - key: urban_renewal.llm_binary_v2
+    name: llm_binary_v2
+    theme: urban_renewal
+    template_file: llm_binary_v2.yaml
+    enabled: false
+    aliases:
+      - structured_binary_adjudication
+    description: Structured JSON prompt for selective LLM binary adjudication.
+    version: 1.0.0
+    lifecycle: candidate
+    owner: system
+    change_summary: Added a binary-first LLM adjudication template used only by the llm_binary_v2 workflow.
   - key: spatial.zero
     name: zero
     theme: spatial

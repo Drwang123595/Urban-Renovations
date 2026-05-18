@@ -9,6 +9,7 @@ import pandas as pd
 from ...runtime.llm_client import DeepSeekClient
 from ..dynamic.binary_refinement import DynamicBinaryRefinementConfig, DynamicBinaryRefiner
 from ..dynamic.topic_discovery import DynamicTopicConfig, DynamicTopicDiscovery
+from ..hybrid.binary_finalizer import LlmBinaryFinalizer, workflow_enabled as llm_binary_v2_enabled
 from ..hybrid.binary_policy_v2 import UrbanBinaryPolicyV2
 from ..strategy import apply_stable_strategy
 
@@ -58,7 +59,20 @@ def postprocess_urban_predictions(
     else:
         _record_postprocess_layer(context, "binary_policy_v2", "skipped")
 
-    # 4) Stable strategy layer: centralizes evidence -> decision explanation.
+    # 4) Optional binary-first LLM adjudication workflow. This is disabled for
+    # the locked stable_v1 contract unless callers explicitly opt in.
+    if llm_binary_v2_enabled(context):
+        enriched = _apply_llm_binary_v2_finalizer(
+            enriched,
+            context=context,
+            llm_client=llm_client,
+            hybrid_llm_assist_enabled=hybrid_llm_assist_enabled,
+            urban_method=urban_method,
+        )
+    else:
+        _record_postprocess_layer(context, "llm_binary_v2", "skipped")
+
+    # 5) Stable strategy layer: centralizes evidence -> decision explanation.
     # By default it appends strategy_* fields only; explicit context may allow
     # it to rewrite final_label / urban_flag / topic_final.
     if _stable_strategy_enabled(context):
@@ -212,6 +226,7 @@ def _apply_binary_policy_v2(
             str(context.get("experiment_track") or "").strip() == "research_matrix"
             and bool(context.get("hybrid_llm_assist_enabled", hybrid_llm_assist_enabled))
             and method_value == "three_stage_hybrid"
+            and not llm_binary_v2_enabled(context)
         )
         policy = UrbanBinaryPolicyV2(
             llm_client=llm_client,
@@ -222,6 +237,30 @@ def _apply_binary_policy_v2(
         return enriched
     except Exception as exc:
         _handle_postprocess_failure(context, "binary_policy_v2", "Urban binary policy failed", exc)
+        return frame
+
+
+def _apply_llm_binary_v2_finalizer(
+    frame: pd.DataFrame,
+    *,
+    context: dict[str, Any],
+    llm_client: DeepSeekClient | None,
+    hybrid_llm_assist_enabled: bool,
+    urban_method: Any,
+) -> pd.DataFrame:
+    """Apply the experimental binary-first selective LLM workflow."""
+
+    try:
+        method_value = getattr(urban_method, "value", str(urban_method or ""))
+        llm_enabled = bool(context.get("hybrid_llm_assist_enabled", hybrid_llm_assist_enabled))
+        if method_value and method_value != "three_stage_hybrid":
+            llm_enabled = False
+        finalizer = LlmBinaryFinalizer(llm_client=llm_client, llm_enabled=llm_enabled)
+        enriched = finalizer.apply(frame)
+        _record_postprocess_layer(context, "llm_binary_v2", "applied")
+        return enriched
+    except Exception as exc:
+        _handle_postprocess_failure(context, "llm_binary_v2", "LLM binary v2 finalization failed", exc)
         return frame
 
 

@@ -285,15 +285,23 @@ def test_build_run_context_records_flow_audit_toggle():
         dynamic_binary_refinement_unknown_only=True,
         dynamic_binary_refinement_allow_flip=False,
         urban_flow_audit_enabled=False,
+        urban_binary_workflow_version="llm_binary_v2",
     )
 
     assert context["urban_flow_audit_enabled"] is False
+    assert context["urban_binary_workflow_version"] == "llm_binary_v2"
 
 
 def test_argument_parser_accepts_flow_audit_toggle():
     args = build_argument_parser().parse_args(["--urban-flow-audit", "off"])
 
     assert args.urban_flow_audit == "off"
+
+
+def test_argument_parser_accepts_urban_binary_workflow():
+    args = build_argument_parser().parse_args(["--urban-binary-workflow", "llm_binary_v2"])
+
+    assert args.urban_binary_workflow == "llm_binary_v2"
 
 
 def test_select_urban_method_uses_default_on_enter(monkeypatch):
