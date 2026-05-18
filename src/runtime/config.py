@@ -7,7 +7,7 @@ from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 
-from .project_paths import DEFAULT_STABLE_DATASET_ID, dataset_paths, data_root
+from .project_paths import DEFAULT_STABLE_DATASET_ID, dataset_paths, data_root, validate_path_segment
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -105,6 +105,7 @@ class Config:
     SESSION_MESSAGE_MAX_CHARS = int(os.environ.get("SESSION_MESSAGE_MAX_CHARS", 1200))
     DEBUG_SENSITIVE_LOGGING = _env_flag("DEBUG_SENSITIVE_LOGGING", False)
     BERTOPIC_INTEGRITY_KEY = os.environ.get("BERTOPIC_INTEGRITY_KEY", "")
+    BERTOPIC_REQUIRE_SIGNED_ARTIFACTS = _env_flag("BERTOPIC_REQUIRE_SIGNED_ARTIFACTS", False)
     BERTOPIC_PRIMARY_ENABLED = _env_flag("BERTOPIC_PRIMARY_ENABLED", True)
     BERTOPIC_PRIMARY_MIN_SUPPORT = int(os.environ.get("BERTOPIC_PRIMARY_MIN_SUPPORT", 35))
     BERTOPIC_PRIMARY_MIN_PURITY = float(os.environ.get("BERTOPIC_PRIMARY_MIN_PURITY", 0.80))
@@ -234,6 +235,10 @@ class Config:
             cls.BERTOPIC_INTEGRITY_KEY = os.environ.get(
                 "BERTOPIC_INTEGRITY_KEY",
                 cls.BERTOPIC_INTEGRITY_KEY,
+            )
+            cls.BERTOPIC_REQUIRE_SIGNED_ARTIFACTS = _env_flag(
+                "BERTOPIC_REQUIRE_SIGNED_ARTIFACTS",
+                cls.BERTOPIC_REQUIRE_SIGNED_ARTIFACTS,
             )
             cls.BERTOPIC_PRIMARY_ENABLED = _env_flag(
                 "BERTOPIC_PRIMARY_ENABLED",
@@ -454,11 +459,13 @@ class Config:
 
     @classmethod
     def stable_release_result_dir(cls, tag: str) -> Path:
-        return cls.STABLE_RELEASE_RUNS_DIR / "stable_release" / str(tag) / "reports"
+        tag = validate_path_segment(tag, field_name="tag")
+        return cls.STABLE_RELEASE_RUNS_DIR / "stable_release" / tag / "reports"
 
     @classmethod
     def stable_release_output_dir(cls, tag: str) -> Path:
-        return cls.STABLE_RELEASE_RUNS_DIR / "stable_release" / str(tag) / "predictions"
+        tag = validate_path_segment(tag, field_name="tag")
+        return cls.STABLE_RELEASE_RUNS_DIR / "stable_release" / tag / "predictions"
 
     @classmethod
     def validate_runtime_environment(

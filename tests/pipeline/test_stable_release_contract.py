@@ -139,6 +139,8 @@ def test_readme_locks_current_stable_release():
     assert "Current project contract as of 2026-04-27" in readme
     assert "Data/<dataset_id>/runs/<track>/<tag>/..." in readme
     assert "scripts/pipeline/run_stable_release.py" in readme
+    assert "scripts/pipeline/main.py" in readme
+    assert "scripts/main.py" not in readme
     assert "three_stage_hybrid --hybrid-llm-assist on" in readme
     assert f"runs/stable_release/{DEFAULT_TAG}" in readme
     assert "deepseek-v4-flash" in readme
@@ -158,6 +160,13 @@ def test_report_dependencies_are_declared_in_recommended_install_targets():
 
     assert required.issubset(_dependency_names(extras["report"]))
     assert required.issubset(_dependency_names(extras["dev"]))
+    assert "pip-audit" in _dependency_names(extras["security"])
+
+
+def test_uv_lock_is_tracked_as_reproducible_dependency_contract():
+    lock_path = PROJECT_ROOT / "uv.lock"
+    assert lock_path.exists()
+    assert 'requires-python = "==3.13.*"' in lock_path.read_text(encoding="utf-8")
 
 
 def test_stable_release_doc_records_thresholds_and_artifacts():
@@ -177,7 +186,8 @@ def test_stable_release_doc_records_thresholds_and_artifacts():
     assert "--urban-method local_topic_classifier --hybrid-llm-assist off --limit 10" in doc_text
     assert 'tmp\\stability_smoke\\local_topic_classifier_limit10.xlsx' in doc_text
     assert "--strict --strict-truth-match --coverage-threshold 0.01" in doc_text
-    assert "`scripts/main.py` is the only root-level compatibility entry" in doc_text
+    assert "`scripts/pipeline/main.py` is the Python version launcher" in doc_text
+    assert "`scripts/main.py` is the only root-level compatibility entry" not in doc_text
     assert f"runs/stable_release/{DEFAULT_TAG}" in doc_text
     assert "Data/<dataset_id>/input/labels/<dataset_id>.xlsx" in doc_text
     assert "deepseek-v4-flash" in doc_text

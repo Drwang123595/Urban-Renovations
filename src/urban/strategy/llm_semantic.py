@@ -78,22 +78,37 @@ class LLMSemanticAnalyzer:
 
         confidence = _safe_float(payload.get("confidence"), 0.0)
         label_hint = _normalize_label(payload.get("label_hint", payload.get("label", "")))
+        object_is_existing_urban = _safe_bool(payload.get("object_is_existing_urban"))
+        renewal_action_present = _safe_bool(payload.get("renewal_action_present"))
+        action_is_main_subject = _safe_bool(payload.get("action_is_main_subject"))
+        is_background_only = _safe_bool(payload.get("is_background_only"))
+        reason = _text(payload.get("reason", ""))
+        used, reason = _semantic_evidence_usage(
+            label_hint=label_hint,
+            confidence=confidence,
+            confidence_floor=self.confidence_floor,
+            object_is_existing_urban=object_is_existing_urban,
+            renewal_action_present=renewal_action_present,
+            action_is_main_subject=action_is_main_subject,
+            is_background_only=is_background_only,
+            reason=reason,
+        )
         return LLMSemanticEvidence(
             attempted=True,
-            used=bool(label_hint in {"0", "1"} and confidence >= self.confidence_floor),
+            used=used,
             research_object=_text(payload.get("research_object", "")),
-            object_is_existing_urban=_safe_bool(payload.get("object_is_existing_urban")),
+            object_is_existing_urban=object_is_existing_urban,
             existing_urban_object=_text(payload.get("existing_urban_object", "")),
-            renewal_action_present=_safe_bool(payload.get("renewal_action_present")),
+            renewal_action_present=renewal_action_present,
             renewal_action=_text(payload.get("renewal_action", "")),
-            action_is_main_subject=_safe_bool(payload.get("action_is_main_subject")),
+            action_is_main_subject=action_is_main_subject,
             policy_or_governance_context=_safe_bool(payload.get("policy_or_governance_context")),
-            is_background_only=_safe_bool(payload.get("is_background_only")),
+            is_background_only=is_background_only,
             exclusion_risk=_text(payload.get("exclusion_risk", "")),
             suggested_topic=_text(payload.get("suggested_topic", "")),
             label_hint=label_hint,
             confidence=confidence,
-            reason=_text(payload.get("reason", "")),
+            reason=reason,
         )
 
     def _process_with_supported_signature(
@@ -182,3 +197,34 @@ def _text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _semantic_evidence_usage(
+    *,
+    label_hint: str,
+    confidence: float,
+    confidence_floor: float,
+    object_is_existing_urban: bool | None,
+    renewal_action_present: bool | None,
+    action_is_main_subject: bool | None,
+    is_background_only: bool | None,
+    reason: str,
+) -> tuple[bool, str]:
+    if label_hint not in {"0", "1"} or confidence < confidence_floor:
+        return False, reason
+    if label_hint == "0":
+        return True, reason
+
+    required = (
+        object_is_existing_urban is True
+        and renewal_action_present is True
+        and action_is_main_subject is True
+        and is_background_only is not True
+    )
+    if required:
+        return True, reason
+
+    suffix = "requires_existing_object_action_main_subject"
+    if reason:
+        return False, f"{reason}; {suffix}"
+    return False, suffix

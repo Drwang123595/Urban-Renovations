@@ -24,7 +24,7 @@ Current evaluation contract:
 - `Precision`, `Recall`, `F1` remain on a `0-1` scale
 - any `Accuracy > 100` is invalid
 - strict tracks allow truth binding only by explicit `--truth` or a unique label workbook
-- `scripts/main.py` is the only root-level compatibility entry
+- `scripts/pipeline/main.py` is the Python version launcher
 
 ## Canonical directory layout
 

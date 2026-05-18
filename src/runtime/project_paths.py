@@ -1,12 +1,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_DIR_NAME = "Data"
 DEFAULT_STABLE_DATASET_ID = "Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407"
+
+
+def validate_path_segment(value: object, *, field_name: str = "path segment") -> str:
+    """Validate a single filesystem path segment used inside managed run paths."""
+
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{field_name} must not be empty.")
+    if text in {".", ".."}:
+        raise ValueError(f"{field_name} must be a plain directory name, got {text!r}.")
+    if any(ord(ch) < 32 for ch in text):
+        raise ValueError(f"{field_name} contains control characters.")
+    if "/" in text or "\\" in text:
+        raise ValueError(f"{field_name} must not contain path separators: {text!r}")
+
+    windows = PureWindowsPath(text)
+    posix = PurePosixPath(text)
+    if windows.is_absolute() or windows.drive or posix.is_absolute():
+        raise ValueError(f"{field_name} must not be an absolute or drive-qualified path: {text!r}")
+    return text
 
 
 def _existing_child_case_insensitive(parent: Path, name: str) -> Path | None:
@@ -75,6 +95,7 @@ class RunPaths:
 
 
 def dataset_paths(dataset_id: str, project_root: Path = PROJECT_ROOT) -> DatasetPaths:
+    dataset_id = validate_path_segment(dataset_id, field_name="dataset_id")
     root = data_root(project_root)
     dataset_dir = root / dataset_id
     return DatasetPaths(
@@ -93,6 +114,9 @@ def run_paths(
     tag: str,
     project_root: Path = PROJECT_ROOT,
 ) -> RunPaths:
+    dataset_id = validate_path_segment(dataset_id, field_name="dataset_id")
+    experiment_track = validate_path_segment(experiment_track, field_name="experiment_track")
+    tag = validate_path_segment(tag, field_name="tag")
     paths = dataset_paths(dataset_id, project_root=project_root)
     run_dir = paths.runs_dir / experiment_track / tag
     return RunPaths(
@@ -119,3 +143,16 @@ def ensure_run_layout(paths: RunPaths) -> None:
     paths.report_dir.mkdir(parents=True, exist_ok=True)
     paths.review_dir.mkdir(parents=True, exist_ok=True)
     paths.log_dir.mkdir(parents=True, exist_ok=True)
+
+
+def safe_dataset_paths(dataset_id: str, project_root: Path = PROJECT_ROOT) -> DatasetPaths:
+    return dataset_paths(dataset_id, project_root=project_root)
+
+
+def safe_run_paths(
+    dataset_id: str,
+    experiment_track: str,
+    tag: str,
+    project_root: Path = PROJECT_ROOT,
+) -> RunPaths:
+    return run_paths(dataset_id, experiment_track, tag, project_root=project_root)

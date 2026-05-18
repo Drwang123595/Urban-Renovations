@@ -852,6 +852,10 @@ class UrbanBERTopicService:
             return False
         if integrity.get("fingerprint") != fingerprint:
             return False
+        if Config.BERTOPIC_REQUIRE_SIGNED_ARTIFACTS and not Config.BERTOPIC_INTEGRITY_KEY:
+            return False
+        if Config.BERTOPIC_REQUIRE_SIGNED_ARTIFACTS and not integrity.get("hmac_sha256"):
+            return False
 
         current_hashes = {
             "manifest_sha256": self._hash_path(manifest_path),

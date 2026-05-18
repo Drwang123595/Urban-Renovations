@@ -16,6 +16,7 @@ from src.urban.strategy import (
     build_evidence_bundle_from_row,
     decide_stable_strategy,
 )
+from src.urban.pipeline import postprocess as postprocess_module
 
 
 class _NoCallLLMStrategy:
@@ -250,6 +251,84 @@ def test_postprocess_appends_stable_strategy_without_mutating_current_output_by_
     assert processed.loc[0, "strategy_status"] == StableDecisionStatus.UNKNOWN_REVIEW.value
 
 
+def test_postprocess_strict_stable_release_raises_when_binary_policy_fails(monkeypatch):
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "Urban renewal of old districts",
+                Schema.ABSTRACT: "The paper studies redevelopment.",
+                "final_label": "1",
+                "urban_flag": "1",
+                "topic_final": "U1",
+            }
+        ]
+    )
+
+    def fail_policy(self, _frame):
+        raise RuntimeError("policy boom")
+
+    monkeypatch.setattr(postprocess_module.UrbanBinaryPolicyV2, "apply", fail_policy)
+
+    try:
+        postprocess_urban_predictions(frame, run_context={"experiment_track": "stable_release"})
+    except RuntimeError as exc:
+        assert "Urban binary policy failed" in str(exc)
+    else:
+        raise AssertionError("stable_release postprocess must fail closed when binary policy fails")
+
+
+def test_postprocess_research_matrix_records_warning_when_binary_policy_fails(monkeypatch):
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "Urban renewal of old districts",
+                Schema.ABSTRACT: "The paper studies redevelopment.",
+                "final_label": "1",
+                "urban_flag": "1",
+                "topic_final": "U1",
+            }
+        ]
+    )
+
+    def fail_policy(self, _frame):
+        raise RuntimeError("policy boom")
+
+    monkeypatch.setattr(postprocess_module.UrbanBinaryPolicyV2, "apply", fail_policy)
+    context = {"experiment_track": "research_matrix"}
+
+    processed = postprocess_urban_predictions(frame, run_context=context)
+
+    assert processed.loc[0, "final_label"] == "1"
+    failed_layers = [
+        item for item in context["urban_postprocess_layers"] if item["status"] == "failed"
+    ]
+    assert failed_layers[-1]["layer"] == "binary_policy_v2"
+    assert "policy boom" in failed_layers[-1]["error"]
+
+
+def test_postprocess_strict_stable_release_raises_when_enabled_dynamic_topic_fails(monkeypatch):
+    frame = pd.DataFrame([{Schema.TITLE: "Urban renewal", Schema.ABSTRACT: "Redevelopment."}])
+
+    class FailingDiscovery:
+        def __init__(self, _config):
+            pass
+
+        def enrich(self, *_args, **_kwargs):
+            raise RuntimeError("dynamic topic boom")
+
+    monkeypatch.setattr(postprocess_module, "DynamicTopicDiscovery", FailingDiscovery)
+
+    try:
+        postprocess_urban_predictions(
+            frame,
+            run_context={"experiment_track": "stable_release", "dynamic_topics_enabled": True},
+        )
+    except RuntimeError as exc:
+        assert "Dynamic topic enrichment failed" in str(exc)
+    else:
+        raise AssertionError("stable_release postprocess must fail closed for enabled dynamic topics")
+
+
 def test_hybrid_classifier_appends_stable_strategy_explanation_without_mutating_final_fields():
     classifier = UrbanHybridClassifier(
         _NoCallLLMStrategy(),
@@ -317,3 +396,35 @@ def test_llm_semantic_analyzer_supports_legacy_strategy_process_signature():
     assert evidence.used is True
     assert evidence.label_hint == "1"
     assert evidence.suggested_topic == "U9"
+
+
+def test_llm_semantic_analyzer_does_not_use_positive_label_without_required_semantic_triplet():
+    class WeakPositiveLLMStrategy:
+        def process(self, *args, **kwargs):
+            return {
+                "label_hint": "1",
+                "confidence": 0.95,
+                "object_is_existing_urban": True,
+                "renewal_action_present": True,
+                "action_is_main_subject": False,
+                "is_background_only": False,
+                "suggested_topic": "U9",
+                "reason": "mentions regeneration but not as the main subject",
+            }
+
+    analyzer = LLMSemanticAnalyzer(WeakPositiveLLMStrategy(), enabled=True)
+
+    evidence = analyzer.analyze(
+        ArticleEvidenceInput(
+            title="Governance discourse around regeneration",
+            abstract="Regeneration is mentioned as policy context.",
+            normalized_text="governance discourse regeneration policy context",
+        ),
+        rule=RuleEvidence(renewal_action_hits=("regeneration",), rule_topic_candidate="N3"),
+        topic=TopicEvidence(topic_candidate="N3", topic_group="nonurban", conflict_flag=1),
+    )
+
+    assert evidence.attempted is True
+    assert evidence.label_hint == "1"
+    assert evidence.used is False
+    assert "requires_existing_object_action_main_subject" in evidence.reason

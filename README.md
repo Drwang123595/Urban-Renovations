@@ -3,9 +3,9 @@
 Current project contract as of 2026-04-27:
 
 - Runtime: Python `3.13`
+- Python version launcher: `scripts/pipeline/main.py`
 - Main entry: `scripts/pipeline/main_py313.py`
 - Stable pipeline entry: `scripts/pipeline/run_stable_release.py`
-- Legacy compatibility entry: `scripts/main.py`
 - Stable configuration: `three_stage_hybrid --hybrid-llm-assist on`
 - Stable model: `deepseek-v4-flash`
 - Primary task shape:
@@ -18,7 +18,8 @@ Current project contract as of 2026-04-27:
   - rule and label iteration support
   - not an online primary decision source
 - LLM is precision-constrained:
-  - only used to collect a family hint for `Unknown`
+  - only used for semantic evidence on difficult or ambiguous samples
+  - positive evidence requires an existing urban object, renewal action, and action-as-main-subject
   - does not overwrite `topic_final`
   - `llm_used` must remain `0` in the stable release
 - Stable decision chain is multi-stage (audited via `decision_source`):
@@ -132,6 +133,13 @@ Reference full-matrix baseline for comparison:
 
 Use the same labeled dataset, same prompt family, and the same evaluator for every release check.
 
+Environment contract:
+
+- recommended install: `uv sync --all-extras`
+- lock verification: `uv lock --check`
+- local environment verification: `.venv-bertopic313\Scripts\python.exe scripts\dev\check_environment.py`
+- optional dependency audit: `.venv-bertopic313\Scripts\python.exe -m pip_audit`
+
 Required matrix:
 
 1. `local_topic_classifier`
@@ -141,7 +149,8 @@ Required matrix:
 Required checks:
 
 - bootstrap environment first:
-  - `python -m pip install -e .[dev]`
+  - `uv sync --all-extras`
+  - `python scripts\dev\check_environment.py`
   - `python -m pytest -q`
 - `evaluate.py` output must include:
   - `All Metrics`

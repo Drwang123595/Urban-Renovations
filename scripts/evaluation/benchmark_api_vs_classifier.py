@@ -22,6 +22,17 @@ from src.urban.urban_topic_classifier import UrbanTopicClassifier
 
 
 THREAD_STATE = threading.local()
+DEFAULT_BENCHMARK_INPUT = (
+    PROJECT_ROOT
+    / "output"
+    / "spreadsheet"
+    / "Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx"
+)
+DEFAULT_BENCHMARK_OUTPUT_DIR = PROJECT_ROOT / "output" / "spreadsheet"
+
+
+def default_benchmark_session_root(tag: str) -> Path:
+    return PROJECT_ROOT / "tmp" / "benchmark_sessions" / str(tag)
 
 
 def _coerce_binary_prediction(value):
@@ -520,7 +531,7 @@ def main():
     )
     parser.add_argument(
         "--input",
-        default=r"C:\Users\26409\Desktop\Urban Renovation\output\spreadsheet\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx",
+        default=str(DEFAULT_BENCHMARK_INPUT),
         help="Standard labeled workbook path",
     )
     parser.add_argument(
@@ -552,7 +563,7 @@ def main():
     )
     parser.add_argument(
         "--outdir",
-        default=r"C:\Users\26409\Desktop\Urban Renovation\output\spreadsheet",
+        default=str(DEFAULT_BENCHMARK_OUTPUT_DIR),
         help="Output directory",
     )
     parser.add_argument(
@@ -567,7 +578,7 @@ def main():
     input_path = Path(args.input)
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    session_root = Path(r"C:\Users\26409\Desktop\Urban Renovation\tmp\benchmark_sessions") / args.tag
+    session_root = default_benchmark_session_root(args.tag)
 
     df = pd.read_excel(input_path, engine="openpyxl")
     truth_col = detect_truth_column(df, args.truth_column)

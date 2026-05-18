@@ -42,6 +42,9 @@ report = [
     "pymupdf>=1.24.0",
     "reportlab>=4.0.0",
 ]
+security = [
+    "pip-audit>=2.7.0",
+]
 topic-discovery = [
     "bertopic>=0.16.0",
     "sentence-transformers>=3.0.0",

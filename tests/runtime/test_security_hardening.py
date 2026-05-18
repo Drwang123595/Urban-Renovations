@@ -11,6 +11,7 @@ from scripts.dev.debug_probe_llm import _build_env_snapshot
 from src.runtime.config import Config, Schema
 from src.runtime.llm_client import DeepSeekClient
 from src.runtime.memory import ConversationMemory
+from src.runtime.project_paths import dataset_paths, run_paths, validate_path_segment
 from src.prompting.generator import PromptGenerator
 from src.strategies.geo_resolver import GeoResolver
 from src.strategies.spatial import SpatialExtractionStrategy
@@ -266,6 +267,80 @@ def test_bertopic_artifact_integrity_rebuilds_when_topic_mapping_is_missing(tmp_
     assert model == "REBUILT_MODEL"
     assert stats["2"]["topic_name"] == "rebuilt"
     assert manifest["fingerprint"] == fingerprint
+
+
+@pytest.mark.parametrize(
+    "bad_segment",
+    [
+        "",
+        ".",
+        "..",
+        "../escape",
+        r"..\escape",
+        "/absolute",
+        r"C:\absolute",
+        "nested/name",
+        r"nested\name",
+        "name\nwith-control",
+    ],
+)
+def test_project_path_segments_reject_path_traversal_and_control_characters(bad_segment):
+    with pytest.raises(ValueError):
+        validate_path_segment(bad_segment, field_name="dataset_id")
+
+    with pytest.raises(ValueError):
+        dataset_paths(bad_segment)
+
+    with pytest.raises(ValueError):
+        run_paths("safe dataset", "stable_release", bad_segment)
+
+
+def test_project_path_segments_allow_local_dataset_names_with_spaces_and_chinese(tmp_path):
+    segment = validate_path_segment("城市更新 数据集 2026", field_name="dataset_id")
+    assert segment == "城市更新 数据集 2026"
+
+    dataset = dataset_paths(segment, project_root=tmp_path)
+    run = run_paths(segment, "stable_release", "baseline_20260427", project_root=tmp_path)
+
+    assert dataset.dataset_dir == tmp_path / "Data" / segment
+    assert run.run_dir == dataset.runs_dir / "stable_release" / "baseline_20260427"
+
+
+def test_stable_release_config_paths_reject_unsafe_tags():
+    with pytest.raises(ValueError):
+        Config.stable_release_result_dir("../escape")
+
+    with pytest.raises(ValueError):
+        Config.stable_release_output_dir(r"C:\escape")
+
+
+def test_bertopic_requires_signed_artifact_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setattr(UrbanBERTopicService, "_import_stack", lambda self: (object, object, object))
+    monkeypatch.setattr(Config, "BERTOPIC_REQUIRE_SIGNED_ARTIFACTS", True, raising=False)
+    monkeypatch.setattr(Config, "BERTOPIC_INTEGRITY_KEY", "")
+    service = UrbanBERTopicService(artifact_dir=tmp_path / "artifacts", train_dir=tmp_path / "train")
+    fingerprint = "fp-signature-required"
+    _prepare_artifact_bundle(service, fingerprint)
+
+    monkeypatch.setattr(service, "_build_fingerprint", lambda: (fingerprint, []))
+    monkeypatch.setattr(
+        service,
+        "_load_model",
+        lambda _path: pytest.fail("unsigned artifact bundle must not be loaded in strict mode"),
+    )
+
+    rebuilt = {}
+
+    def fake_fit_and_save(**_kwargs):
+        rebuilt["called"] = True
+        return "REBUILT_MODEL", {"2": {"topic_name": "rebuilt"}}, {"fingerprint": fingerprint}
+
+    monkeypatch.setattr(service, "_fit_and_save", fake_fit_and_save)
+
+    model, _stats, _manifest = service._load_or_fit_artifacts()
+
+    assert rebuilt["called"] is True
+    assert model == "REBUILT_MODEL"
 
 
 def test_bertopic_artifact_path_guard_rejects_escape(tmp_path, monkeypatch):
