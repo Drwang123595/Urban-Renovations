@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.urban.hybrid.classifier`."""
 
-alias_module(__name__, "src.urban.hybrid.classifier", globals())
+from .hybrid.classifier import *  # noqa: F403

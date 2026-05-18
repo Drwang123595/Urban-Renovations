@@ -19,7 +19,7 @@ from ..taxonomy.core import (
     CORE_RENEWAL_ANCHORS,
     UNKNOWN_TOPIC_LABEL,
 )
-from ..urban_metadata import normalize_phrase
+from ..core.metadata import normalize_phrase
 from .evidence import ArticleEvidenceInput, RuleEvidence
 
 

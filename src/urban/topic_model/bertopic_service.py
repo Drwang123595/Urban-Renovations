@@ -15,10 +15,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from ...runtime.config import Config, Schema
-from ..urban_metadata import UrbanMetadataRecord, normalize_phrase, tokenize_text
+from ..core.metadata import UrbanMetadataRecord, normalize_phrase, tokenize_text
 from .local_classifier import UrbanTopicClassifier
 from ..taxonomy.core import TOPIC_DEFINITIONS, TOPIC_ENGLISH_NAMES, TOPIC_ORDER
-from ..urban_training_contract import allowed_training_workbooks, assert_training_source_contract
+from ..core.training_contract import allowed_training_workbooks, assert_training_source_contract
 
 
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"

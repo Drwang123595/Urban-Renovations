@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from ...runtime.config import Schema
-from ..urban_metadata import normalize_phrase
+from ..core.metadata import normalize_phrase
 from .evidence import ArticleEvidenceInput
 
 

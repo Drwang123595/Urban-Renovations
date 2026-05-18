@@ -1,4 +1,8 @@
-"""Compatibility wrappers for the former strategy_v3 shadow helpers."""
+"""Compatibility wrappers for legacy strategy_v3 imports.
+
+The canonical implementation is the stable strategy pipeline in
+``src.urban.strategy.pipeline``.
+"""
 
 from __future__ import annotations
 

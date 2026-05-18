@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Sequence
 
-from ..urban_metadata import UrbanMetadataRecord, normalize_phrase
+from ..core.metadata import UrbanMetadataRecord, normalize_phrase
 from ..taxonomy.core import (
     COMMON_EXISTING_URBAN_OBJECTS,
     UNKNOWN_TOPIC_GROUP,

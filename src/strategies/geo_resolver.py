@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.spatial.geo_resolver`."""
 
-alias_module(__name__, "src.spatial.geo_resolver", globals())
+from ..spatial.geo_resolver import *  # noqa: F403

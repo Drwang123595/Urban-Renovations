@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.urban.topic_model.family_gate`."""
 
-alias_module(__name__, "src.urban.topic_model.family_gate", globals())
+from .topic_model.family_gate import *  # noqa: F403

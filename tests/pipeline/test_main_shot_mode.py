@@ -6,8 +6,8 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-import scripts.main as main_module
-from scripts.main import (
+import scripts.pipeline.main as main_module
+from scripts.pipeline.main import (
     build_argument_parser,
     build_run_context,
     choose_task_mode,
@@ -348,10 +348,10 @@ def test_choose_task_mode_defaults_stable_release_to_urban(monkeypatch):
     assert args.task == TaskType.URBAN_RENEWAL
 
 
-def test_script_main_help_is_available_from_root_entrypoint():
+def test_script_main_help_is_available_from_pipeline_entrypoint():
     project_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
-        [sys.executable, str(project_root / "scripts" / "main.py"), "--help"],
+        [sys.executable, str(project_root / "scripts" / "pipeline" / "main.py"), "--help"],
         cwd=project_root,
         text=True,
         capture_output=True,

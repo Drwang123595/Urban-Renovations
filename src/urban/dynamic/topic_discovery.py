@@ -9,7 +9,7 @@ from typing import Any, Iterable, Sequence
 import pandas as pd
 
 from ...runtime.config import Schema
-from ..urban_metadata import normalize_phrase
+from ..core.metadata import normalize_phrase
 from ..taxonomy.core import (
     COMMON_RENEWAL_ANCHORS,
     OPEN_SET_NONURBAN_LABEL,

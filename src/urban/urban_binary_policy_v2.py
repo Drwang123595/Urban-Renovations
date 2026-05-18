@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.urban.hybrid.binary_policy_v2`."""
 
-alias_module(__name__, "src.urban.hybrid.binary_policy_v2", globals())
+from .hybrid.binary_policy_v2 import *  # noqa: F403

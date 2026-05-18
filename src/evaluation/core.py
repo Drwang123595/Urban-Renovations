@@ -1,3 +1,3 @@
-from .._compat import alias_module
+"""Compatibility wrapper for :mod:`src.evaluation.metrics`."""
 
-alias_module(__name__, "src.evaluation.metrics", globals())
+from .metrics import *  # noqa: F403

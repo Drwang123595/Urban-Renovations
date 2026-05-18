@@ -18,7 +18,7 @@ from ..runtime.project_paths import ensure_run_layout, run_paths
 from ..spatial.extraction import SpatialExtractionStrategy
 from ..strategies.stepwise_long import StepwiseLongContextStrategy
 from ..urban.hybrid.classifier import UrbanHybridClassifier
-from ..urban.urban_metadata import UrbanMetadataRecord
+from ..urban.core.metadata import UrbanMetadataRecord
 from ..urban.topic_model.local_classifier import UrbanTopicClassifier
 from ..urban.taxonomy.core import legacy_topic_for_label, urban_flag_for_topic_label
 from ..urban.pipeline.io import (

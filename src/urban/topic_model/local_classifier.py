@@ -8,8 +8,8 @@ from typing import Dict, Iterable, List, Optional, Sequence
 import pandas as pd
 
 from ...runtime.config import Config, Schema
-from ..urban_metadata import UrbanMetadataRecord, tokenize_text
-from ..urban_training_contract import allowed_training_workbooks, assert_training_source_contract
+from ..core.metadata import UrbanMetadataRecord, tokenize_text
+from ..core.training_contract import allowed_training_workbooks, assert_training_source_contract
 from ..taxonomy.core import (
     TOPIC_DEFINITIONS,
     UNKNOWN_TOPIC_GROUP,

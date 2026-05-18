@@ -5,7 +5,7 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from scripts.analysis.evaluate_spatial_gpt_vs_pipeline import load_and_align
+from scripts.analysis.spatial.evaluate_gpt_vs_pipeline import load_and_align
 from src.runtime.config import Schema
 
 

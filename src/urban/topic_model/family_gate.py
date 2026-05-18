@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from ...runtime.config import Config, Schema
 from .bertopic_service import BERTopicSignal
-from ..urban_metadata import UrbanMetadataRecord, normalize_phrase
+from ..core.metadata import UrbanMetadataRecord, normalize_phrase
 from ..rules.metadata_filter import R7_STRONG_RENEWAL_MECHANISMS
 from ..taxonomy.core import (
     COMMON_EXISTING_URBAN_OBJECTS,
@@ -16,7 +16,7 @@ from ..taxonomy.core import (
     UNKNOWN_TOPIC_GROUP,
     topic_group_for_label,
 )
-from ..urban_training_contract import allowed_training_workbooks
+from ..core.training_contract import allowed_training_workbooks
 
 
 MODEL_FEATURE_COLUMNS = [
