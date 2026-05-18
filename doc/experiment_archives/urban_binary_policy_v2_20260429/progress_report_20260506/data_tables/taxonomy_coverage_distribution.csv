@@ -1,0 +1,6 @@
+﻿run_id,taxonomy_coverage_status,count,rate
+40276_full_no_llm_policy_v2_complete_20260429,covered,28930,0.718294
+40276_full_no_llm_policy_v2_complete_20260429,unknown,10625,0.263805
+40276_full_no_llm_policy_v2_complete_20260429,open_set,439,0.010900
+40276_full_no_llm_policy_v2_complete_20260429,hard_negative,184,0.004568
+40276_full_no_llm_policy_v2_complete_20260429,binary_resolved,98,0.002433

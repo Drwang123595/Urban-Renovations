@@ -1,0 +1,63 @@
+﻿field,group,definition
+Article Title,输入信息,文献标题，用于人工检索、复核和主题判断。
+Abstract,输入信息,摘要文本，用于人工复核和证据追溯。
+Author Keywords,输入信息,作者关键词。
+Keywords Plus,输入信息,扩展关键词。
+Keywords,输入信息,合并或补充关键词字段。
+WoS Categories,输入信息,Web of Science 学科分类。
+Research Areas,输入信息,研究领域背景。
+是否属于城市更新研究,最终二分类,中文最终二分类标签，1 表示城市更新研究，0 表示非城市更新研究。
+urban_flag,最终二分类,机器最终二分类标签，应与 final_label 一致。
+final_label,最终二分类,最终二分类主字段。
+urban_probability_score,最终二分类,规则/模型融合后的城市更新概率或分数。
+binary_decision_threshold,最终二分类,二分类判定阈值。
+topic_final,固定主题体系,固定 taxonomy 下的最终主题标签。
+topic_final_group,固定主题体系,固定主题组：urban、nonurban 或 unknown。
+topic_final_name,固定主题体系,固定主题名称。
+taxonomy_coverage_status,固定主题体系,固定主题体系覆盖状态，如 covered、unknown、open_set、binary_resolved。
+open_set_flag,固定主题体系,是否进入开放集判断。
+open_set_topic,固定主题体系,开放集候选主题。
+open_set_reason,固定主题体系,开放集判断原因。
+binary_policy_action,二分类策略,最终策略动作：accept_positive、accept_negative、protected_negative、conflict_review。
+binary_policy_reason,二分类策略,最终策略动作原因。
+binary_policy_conflict_type,二分类策略,冲突类型组合，便于筛选困难样本。
+binary_decision_source,二分类策略,二分类来源链。
+binary_decision_evidence,二分类策略,二分类证据摘要。
+binary_topic_consistency_flag,二分类策略,二分类与主题是否存在不一致。
+decision_explanation,规则证据链,最终判定解释。
+primary_positive_evidence,规则证据链,主要正向证据。
+primary_negative_evidence,规则证据链,主要负向证据。
+evidence_balance,规则证据链,证据倾向，如 strong_positive、conflict_positive。
+decision_rule_stack,规则证据链,规则链路。
+unknown_recovery_path,规则证据链,Unknown 恢复路径。
+unknown_recovery_evidence,规则证据链,Unknown 恢复证据。
+anchor_guard_flag,规则证据链,锚点保护是否触发。
+anchor_guard_action,规则证据链,锚点保护动作。
+anchor_guard_reason,规则证据链,锚点保护原因。
+review_flag_raw,复核信号,原始复核标记。
+review_reason_raw,复核信号,原始复核原因。
+review_flag,复核信号,复核标记。
+review_reason,复核信号,复核原因。
+dynamic_topic_id,动态主题层,动态主题编号。
+dynamic_topic_name_zh,动态主题层,动态主题中文名称。
+dynamic_topic_keywords,动态主题层,动态主题关键词。
+dynamic_topic_size,动态主题层,动态主题簇样本量。
+dynamic_topic_confidence,动态主题层,动态主题置信度。
+dynamic_topic_source_pool,动态主题层,动态主题来源池。
+dynamic_to_fixed_topic_candidate,动态主题层,建议映射到的固定主题。
+dynamic_mapping_status,动态主题层,动态主题映射状态。
+dynamic_binary_candidate_label,动态二分类修正,动态主题建议二分类标签。
+dynamic_binary_candidate_confidence,动态二分类修正,动态二分类候选置信度。
+dynamic_binary_candidate_action,动态二分类修正,动态二分类候选动作。
+dynamic_binary_candidate_reason,动态二分类修正,动态二分类候选原因。
+dynamic_binary_override_applied,动态二分类修正,是否应用动态二分类覆盖。
+dynamic_binary_override_label,动态二分类修正,动态二分类覆盖标签。
+dynamic_binary_override_topic,动态二分类修正,动态二分类覆盖主题。
+dynamic_binary_override_reason,动态二分类修正,动态二分类覆盖原因。
+llm_used,LLM 裁决,是否实际使用 LLM 覆盖结果。no-LLM 全量应为 0。
+llm_attempted,LLM 裁决,是否尝试调用 LLM。no-LLM 全量应为 0。
+llm_failure_reason,LLM 裁决,LLM 失败原因。
+llm_adjudication_required,LLM 裁决,是否需要 LLM 困难样本裁决。
+llm_adjudication_label,LLM 裁决,LLM 裁决标签。no-LLM 路径通常为空。
+llm_adjudication_confidence,LLM 裁决,LLM 裁决置信度。
+llm_adjudication_reason,LLM 裁决,LLM 裁决理由。

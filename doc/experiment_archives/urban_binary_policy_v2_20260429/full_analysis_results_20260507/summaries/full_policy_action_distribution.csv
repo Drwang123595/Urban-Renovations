@@ -1,0 +1,5 @@
+﻿"run_id","binary_policy_action","count","rate"
+"40276_full_no_llm_policy_v2_complete_20260429","conflict_review","16939","0.420573"
+"40276_full_no_llm_policy_v2_complete_20260429","accept_positive","13831","0.343406"
+"40276_full_no_llm_policy_v2_complete_20260429","accept_negative","9322","0.231453"
+"40276_full_no_llm_policy_v2_complete_20260429","protected_negative","184","0.004568"

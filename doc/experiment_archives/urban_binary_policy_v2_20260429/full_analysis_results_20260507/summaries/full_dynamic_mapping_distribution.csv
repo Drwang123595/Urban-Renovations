@@ -1,0 +1,5 @@
+﻿"run_id","dynamic_mapping_status","count","rate"
+"40276_full_no_llm_policy_v2_complete_20260429","mapped_to_fixed","30254","0.751167"
+"40276_full_no_llm_policy_v2_complete_20260429","needs_review","7457","0.185147"
+"40276_full_no_llm_policy_v2_complete_20260429","candidate_new_nonurban_topic","2378","0.059043"
+"40276_full_no_llm_policy_v2_complete_20260429","candidate_new_urban_topic","187","0.004643"

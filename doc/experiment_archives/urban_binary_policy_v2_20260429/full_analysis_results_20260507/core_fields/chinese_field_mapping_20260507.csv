@@ -1,0 +1,63 @@
+﻿中文字段名,原始字段名,字段分组,说明
+文献标题,Article Title,输入信息,文献题名，便于检索和人工判断。
+摘要,Abstract,输入信息,文献摘要，是判断城市更新对象和更新动作的主要证据。
+作者关键词,Author Keywords,输入信息,作者提供的关键词。
+扩展关键词,Keywords Plus,输入信息,数据库扩展关键词。
+关键词合并字段,Keywords,输入信息,合并或补充关键词字段。
+WoS学科分类,WoS Categories,输入信息,Web of Science 学科类别。
+研究领域,Research Areas,输入信息,研究领域背景。
+是否属于城市更新研究,是否属于城市更新研究,最终二分类,中文最终二分类标签，1 为城市更新研究，0 为非城市更新研究。
+城市更新标记,urban_flag,最终二分类,机器最终二分类标签，应与最终二分类标签一致。
+最终二分类标签,final_label,最终二分类,最终二分类主字段，1/0。
+城市更新概率分数,urban_probability_score,最终二分类,规则和本地模型融合后的城市更新倾向分数。
+二分类判定阈值,binary_decision_threshold,最终二分类,二分类判定使用的阈值。
+固定主题标签,topic_final,固定主题体系,固定 taxonomy 下的主题标签。
+固定主题组,topic_final_group,固定主题体系,固定主题组，通常为 urban、nonurban、unknown。
+固定主题名称,topic_final_name,固定主题体系,固定主题的可读名称。
+主题覆盖状态,taxonomy_coverage_status,固定主题体系,固定 taxonomy 的覆盖状态，如 covered、unknown、open_set、binary_resolved。
+开放集标记,open_set_flag,固定主题体系,是否进入开放集判断。
+开放集主题,open_set_topic,固定主题体系,开放集候选主题。
+开放集原因,open_set_reason,固定主题体系,进入开放集的原因。
+二分类策略动作,binary_policy_action,二分类策略,最终策略动作，如 accept_positive、accept_negative、protected_negative、conflict_review。
+二分类策略原因,binary_policy_reason,二分类策略,最终策略动作的原因。
+二分类冲突类型,binary_policy_conflict_type,二分类策略,主题、证据、阈值或动态主题造成的冲突类型。
+二分类判定来源,binary_decision_source,二分类策略,二分类结果的来源链。
+二分类判定证据,binary_decision_evidence,二分类策略,二分类判定的证据摘要。
+二分类-主题一致性标记,binary_topic_consistency_flag,二分类策略,二分类结果与主题结果是否存在不一致。
+判定说明,decision_explanation,规则证据链,最终判定的自然语言说明。
+主要支持证据,primary_positive_evidence,规则证据链,支持判为城市更新研究的主要证据。
+主要排除证据,primary_negative_evidence,规则证据链,支持排除或提示风险的主要证据。
+证据倾向,evidence_balance,规则证据链,正负证据的总体倾向。
+规则链路,decision_rule_stack,规则证据链,触发的规则链路。
+未知主题恢复路径,unknown_recovery_path,规则证据链,Unknown 样本恢复到明确判断的路径。
+未知主题恢复证据,unknown_recovery_evidence,规则证据链,Unknown 恢复判断的证据。
+锚点保护标记,anchor_guard_flag,规则证据链,城市更新锚点保护是否触发。
+锚点保护动作,anchor_guard_action,规则证据链,锚点保护采取的动作。
+锚点保护原因,anchor_guard_reason,规则证据链,锚点保护原因。
+原始复核标记,review_flag_raw,复核信号,原始复核触发标记。
+原始复核原因,review_reason_raw,复核信号,原始复核原因。
+复核标记,review_flag,复核信号,复核触发标记。
+复核原因,review_reason,复核信号,复核原因。
+动态主题编号,dynamic_topic_id,动态主题层,动态主题簇编号。
+动态主题名称,dynamic_topic_name_zh,动态主题层,规则生成的动态主题中文名称。
+动态主题关键词,dynamic_topic_keywords,动态主题层,动态主题关键词。
+动态主题规模,dynamic_topic_size,动态主题层,动态主题簇包含的样本量。
+动态主题置信度,dynamic_topic_confidence,动态主题层,动态主题稳定性或置信度。
+动态主题来源池,dynamic_topic_source_pool,动态主题层,动态主题来自 unknown、review 或 full corpus 等来源池。
+动态映射候选固定主题,dynamic_to_fixed_topic_candidate,动态主题层,动态主题建议映射到的固定主题。
+动态主题映射状态,dynamic_mapping_status,动态主题层,动态主题与固定主题的映射状态。
+动态二分类候选标签,dynamic_binary_candidate_label,动态二分类修正,动态主题给出的二分类候选标签。
+动态二分类候选置信度,dynamic_binary_candidate_confidence,动态二分类修正,动态二分类候选置信度。
+动态二分类候选动作,dynamic_binary_candidate_action,动态二分类修正,动态二分类候选动作。
+动态二分类候选原因,dynamic_binary_candidate_reason,动态二分类修正,动态二分类候选原因。
+动态二分类修正是否应用,dynamic_binary_override_applied,动态二分类修正,是否实际应用动态二分类修正。
+动态二分类修正标签,dynamic_binary_override_label,动态二分类修正,动态二分类修正后的标签。
+动态二分类修正主题,dynamic_binary_override_topic,动态二分类修正,动态二分类修正对应主题。
+动态二分类修正原因,dynamic_binary_override_reason,动态二分类修正,动态二分类修正原因。
+LLM实际使用标记,llm_used,LLM裁决,是否实际使用 LLM 覆盖结果，no-LLM 全量应为 0。
+LLM尝试调用标记,llm_attempted,LLM裁决,是否尝试调用 LLM，no-LLM 全量应为 0。
+LLM失败原因,llm_failure_reason,LLM裁决,LLM 调用或解析失败原因。
+是否需要LLM裁决,llm_adjudication_required,LLM裁决,规则认为是否需要 LLM 处理的困难样本标记。
+LLM裁决标签,llm_adjudication_label,LLM裁决,LLM 给出的裁决标签。
+LLM裁决置信度,llm_adjudication_confidence,LLM裁决,LLM 裁决置信度。
+LLM裁决理由,llm_adjudication_reason,LLM裁决,LLM 裁决理由。

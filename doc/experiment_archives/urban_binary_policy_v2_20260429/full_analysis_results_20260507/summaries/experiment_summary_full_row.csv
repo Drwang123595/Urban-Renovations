@@ -1,0 +1,2 @@
+﻿"run_id","phase","description","dataset","llm_mode","notes","rows","positive_count","negative_count","positive_rate","llm_used_sum","llm_attempted_sum","accuracy","precision","recall","f1","tp","tn","fp","fn"
+"40276_full_no_llm_policy_v2_complete_20260429","full_corpus_validation","V2 稳定策略全量 no-LLM 完整运行","40276 full corpus unlabeled","off","全量完成；正例率 76.40%；日志未检出 API/DeepSeek/HTTP 调用痕迹","40276","30770","9506","0.763979","0","0","","","","","","","",""
