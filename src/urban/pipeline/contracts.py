@@ -7,7 +7,7 @@ from typing import Any
 from ...runtime.config import Schema
 from ..dynamic.topic_discovery import DYNAMIC_BINARY_DEFAULTS, DYNAMIC_TOPIC_DEFAULTS
 from ..hybrid.binary_policy_v2 import BINARY_POLICY_V2_DEFAULTS
-from ..strategy import STRATEGY_V3_DEFAULTS
+from ..strategy import STABLE_STRATEGY_DEFAULTS, STRATEGY_V3_DEFAULTS
 
 
 EXPLAINABILITY_DEFAULTS: dict[str, Any] = {
@@ -28,6 +28,7 @@ EXPLAINABILITY_DEFAULTS: dict[str, Any] = {
 DYNAMIC_TOPIC_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(DYNAMIC_TOPIC_DEFAULTS)
 DYNAMIC_BINARY_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(DYNAMIC_BINARY_DEFAULTS)
 BINARY_POLICY_V2_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(BINARY_POLICY_V2_DEFAULTS)
+STABLE_STRATEGY_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(STABLE_STRATEGY_DEFAULTS)
 STRATEGY_V3_DEFAULTS_FOR_OUTPUT: dict[str, Any] = dict(STRATEGY_V3_DEFAULTS)
 
 URBAN_RESULT_COLUMNS = [
@@ -198,6 +199,15 @@ URBAN_RESULT_COLUMNS = [
     "llm_adjudication_label",
     "llm_adjudication_confidence",
     "llm_adjudication_reason",
+    "strategy_label",
+    "strategy_topic",
+    "strategy_status",
+    "strategy_reason",
+    "strategy_confidence",
+    "positive_evidence",
+    "negative_evidence",
+    "llm_semantic_evidence",
+    "evidence_conflict_type",
     "strategy_v3_label",
     "strategy_v3_topic",
     "strategy_v3_status",
@@ -213,6 +223,7 @@ OUTPUT_DEFAULT_GROUPS = (
     DYNAMIC_TOPIC_DEFAULTS_FOR_OUTPUT,
     DYNAMIC_BINARY_DEFAULTS_FOR_OUTPUT,
     BINARY_POLICY_V2_DEFAULTS_FOR_OUTPUT,
+    STABLE_STRATEGY_DEFAULTS_FOR_OUTPUT,
     STRATEGY_V3_DEFAULTS_FOR_OUTPUT,
 )
 

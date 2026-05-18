@@ -10,7 +10,7 @@ from ...runtime.llm_client import DeepSeekClient
 from ..dynamic.binary_refinement import DynamicBinaryRefinementConfig, DynamicBinaryRefiner
 from ..dynamic.topic_discovery import DynamicTopicConfig, DynamicTopicDiscovery
 from ..hybrid.binary_policy_v2 import UrbanBinaryPolicyV2
-from ..strategy import apply_strategy_v3_shadow
+from ..strategy import apply_stable_strategy
 
 
 def postprocess_urban_predictions(
@@ -24,9 +24,10 @@ def postprocess_urban_predictions(
     """Apply batch-only urban-renewal post-processing in contract order.
 
     Dynamic topic discovery only appends evidence columns. Dynamic binary
-    refinement may mutate final labels only when explicitly enabled. The V2
-    binary policy is the current final batch reconciliation layer; V3 runs
-    afterward in shadow mode and only appends strategy_v3_* candidates.
+    refinement may mutate final labels only when explicitly enabled. The
+    binary policy remains the production reconciliation layer for legacy
+    stability; the stable strategy layer appends one explainable decision
+    candidate by default and can mutate final fields only by explicit context.
     """
 
     context = run_context or {}
@@ -40,8 +41,8 @@ def postprocess_urban_predictions(
     if _dynamic_binary_refinement_enabled(context):
         enriched = _apply_dynamic_binary_refinement(enriched, context)
 
-    # 3) Current final binary policy layer: last authority over production
-    # final_label / urban_flag reconciliation.
+    # 3) Legacy binary reconciliation layer: preserves existing production
+    # final_label / urban_flag behavior unless callers disable it.
     if _binary_policy_v2_enabled(context):
         enriched = _apply_binary_policy_v2(
             enriched,
@@ -51,9 +52,11 @@ def postprocess_urban_predictions(
             urban_method=urban_method,
         )
 
-    # 4) Shadow strategy layer: appends strategy_v3_* for evaluation only.
-    if _strategy_v3_shadow_enabled(context):
-        enriched = _apply_strategy_v3_shadow(enriched)
+    # 4) Stable strategy layer: centralizes evidence -> decision explanation.
+    # By default it appends strategy_* fields only; explicit context may allow
+    # it to rewrite final_label / urban_flag / topic_final.
+    if _stable_strategy_enabled(context):
+        enriched = _apply_stable_strategy_layer(enriched, context)
 
     return enriched
 
@@ -76,8 +79,14 @@ def _binary_policy_v2_enabled(context: dict[str, Any]) -> bool:
     return bool(context.get("urban_binary_policy_v2_enabled", True))
 
 
-def _strategy_v3_shadow_enabled(context: dict[str, Any]) -> bool:
-    """Return whether V3 shadow candidates should be appended."""
+def _stable_strategy_enabled(context: dict[str, Any]) -> bool:
+    """Return whether the stable strategy decision should be appended."""
+
+    raw = context.get("urban_stable_strategy_enabled", None)
+    if raw is not None:
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
     raw = context.get("urban_strategy_v3_shadow_enabled", None)
     if raw is not None:
@@ -85,8 +94,15 @@ def _strategy_v3_shadow_enabled(context: dict[str, Any]) -> bool:
             return raw
         return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
-    version = str(context.get("urban_strategy_version", "v3_shadow") or "").strip().lower()
-    return version not in {"0", "false", "off", "disabled", "none", "v2"}
+    version = str(context.get("urban_strategy_version", "stable") or "").strip().lower()
+    return version not in {"0", "false", "off", "disabled", "none", "legacy"}
+
+
+def _stable_strategy_mutates_final_fields(context: dict[str, Any]) -> bool:
+    raw = context.get("urban_stable_strategy_mutate_final_fields", False)
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _append_dynamic_topic_evidence(frame: pd.DataFrame, context: dict[str, Any]) -> pd.DataFrame:
@@ -130,7 +146,7 @@ def _apply_binary_policy_v2(
     hybrid_llm_assist_enabled: bool,
     urban_method: Any,
 ) -> pd.DataFrame:
-    """Apply the final V2 binary reconciliation policy."""
+    """Apply the legacy binary reconciliation policy."""
 
     try:
         method_value = getattr(urban_method, "value", str(urban_method or ""))
@@ -145,15 +161,18 @@ def _apply_binary_policy_v2(
         )
         return policy.apply(frame)
     except Exception as exc:
-        print(f"[WARN] Urban binary policy V2 failed, continuing without it: {type(exc).__name__}: {exc}")
+        print(f"[WARN] Urban binary policy failed, continuing without it: {type(exc).__name__}: {exc}")
         return frame
 
 
-def _apply_strategy_v3_shadow(frame: pd.DataFrame) -> pd.DataFrame:
-    """Append V3 strategy candidates without mutating production fields."""
+def _apply_stable_strategy_layer(frame: pd.DataFrame, context: dict[str, Any]) -> pd.DataFrame:
+    """Append or apply the stable evidence strategy."""
 
     try:
-        return apply_strategy_v3_shadow(frame)
+        return apply_stable_strategy(
+            frame,
+            mutate_final_fields=_stable_strategy_mutates_final_fields(context),
+        )
     except Exception as exc:
-        print(f"[WARN] Urban strategy V3 shadow failed, continuing without it: {type(exc).__name__}: {exc}")
+        print(f"[WARN] Urban stable strategy failed, continuing without it: {type(exc).__name__}: {exc}")
         return frame

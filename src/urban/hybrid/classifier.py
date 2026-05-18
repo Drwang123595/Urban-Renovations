@@ -32,6 +32,9 @@ from ..taxonomy.core import (
     topic_name_for_label,
     urban_flag_for_topic_label,
 )
+from ..strategy.decision import decide_stable_strategy
+from ..strategy.output import apply_decision_to_row
+from ..strategy.pipeline import build_evidence_bundle_from_row
 from .binary_scoring import (
     BINARY_HARD_NEGATIVE_REASONS,
     apply_binary_decision as _apply_binary_decision_helper,
@@ -270,7 +273,11 @@ class UrbanHybridClassifier:
             route_result=route_result,
         )
         if hard_negative_result is not None:
-            return hard_negative_result
+            return self._apply_stable_strategy_overlay(
+                hard_negative_result,
+                title=title,
+                abstract=abstract,
+            )
 
         topic_prediction, bertopic_signal = self._stage2_attach_model_evidence(
             base,
@@ -297,11 +304,39 @@ class UrbanHybridClassifier:
             llm_family_hint=llm_family_hint,
             fusion_final_topic=fusion_final_topic,
         )
-        return self._stage5_apply_binary_and_build_result(
+        result = self._stage5_apply_binary_and_build_result(
             base,
             record=record,
             route_result=route_result,
             state=state,
+        )
+        return self._apply_stable_strategy_overlay(
+            result,
+            title=title,
+            abstract=abstract,
+        )
+
+    def _apply_stable_strategy_overlay(
+        self,
+        result: Dict[str, Any],
+        *,
+        title: str,
+        abstract: str,
+    ) -> Dict[str, Any]:
+        """Append the stable evidence-strategy decision without changing legacy final fields."""
+
+        evidence_row = {
+            **result,
+            Schema.TITLE: title,
+            Schema.ABSTRACT: abstract,
+        }
+        evidence = build_evidence_bundle_from_row(evidence_row)
+        decision = decide_stable_strategy(evidence)
+        return apply_decision_to_row(
+            result,
+            evidence,
+            decision,
+            mutate_final_fields=False,
         )
 
     def _stage1_build_rule_baseline(
