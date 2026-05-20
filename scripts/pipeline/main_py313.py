@@ -16,6 +16,7 @@ from src.prompting.manifest import (
 )
 from src.prompting.strategy_registry import PromptStrategyDefinition, PromptStrategyRegistry
 from src.runtime.config import Config
+from src.runtime.project_paths import resolve_managed_output_path, resolve_train_input_path
 from src.tasks.task_router import TaskRouter, TaskType, UrbanMethod
 from src.urban.hybrid.binary_finalizer import summarize_llm_binary_v2
 
@@ -47,7 +48,8 @@ def print_startup_overview(urban_modes, spatial_modes):
     print("Experiment tracks:")
     print(f"  - {', '.join(Config.EXPERIMENT_TRACKS)}")
     print("Output:")
-    print("  - AUTO: Data/<dataset>/runs/<track>/<run_tag>/predictions/<task>_<shot>_<timestamp>.xlsx")
+    print("  - AUTO: Data/output/<dataset>/runs/<track>/<run_tag>/predictions/<task_dir>/<file>.xlsx")
+    print("  - task_dir: urban_renewal | spatial | merged")
     print("  - Each run also writes <output>.prompt_manifest.json")
     print(f"{'=' * 60}")
 
@@ -75,27 +77,8 @@ def select_experiment_track(default_track: str) -> str:
 
 
 def _candidate_input_dirs_for_track(experiment_track: str) -> list[Path]:
-    track = normalize_experiment_track(experiment_track)
-    candidates: list[Path] = []
-
-    if track == "stable_release":
-        candidates.extend(
-            [
-                Config.STABLE_RELEASE_LABELS_DIR,
-                Config.STABLE_RELEASE_LEGACY_LABELS_DIR,
-                Config.STABLE_RELEASE_TASK_DIR,
-            ]
-        )
-    elif track == "legacy_archive":
-        candidates.extend(
-            [
-                Config.LEGACY_BASELINE_TASK_DIR / "labels",
-                Config.LEGACY_BASELINE_TASK_DIR,
-                Config.TRAIN_DIR,
-            ]
-        )
-    else:
-        candidates.append(Config.TRAIN_DIR)
+    normalize_experiment_track(experiment_track)
+    candidates: list[Path] = [Config.TRAIN_DIR]
 
     seen = set()
     existing: list[Path] = []
@@ -422,9 +405,9 @@ def is_train_scoped_input(input_value: str | None) -> bool:
     if not input_value:
         return False
     try:
-        input_path = Path(input_value).resolve()
+        input_path = resolve_train_input_path(input_value, project_root=Config.DATA_DIR.parent, must_exist=False)
         train_root = Config.TRAIN_DIR.resolve()
-    except FileNotFoundError:
+    except (FileNotFoundError, ValueError):
         return False
     return input_path == train_root or train_root in input_path.parents
 
@@ -438,8 +421,6 @@ def infer_experiment_track(explicit_track: str | None, input_value: str | None) 
 
 
 def default_input_for_track(experiment_track: str) -> str | None:
-    if experiment_track == "stable_release" and Config.STABLE_RELEASE_LABEL_FILE.exists():
-        return str(Config.STABLE_RELEASE_LABEL_FILE)
     return default_train_input()
 
 
@@ -448,33 +429,15 @@ def resolve_dataset_id(input_path: Path, dataset_id: str | None, experiment_trac
         return dataset_id
     if experiment_track == "stable_release":
         return Config.STABLE_RELEASE_DATASET_ID
-    parents = input_path.resolve().parents
-    data_root = Config.DATA_DIR.resolve()
-    if data_root in parents:
-        for parent in parents:
-            if parent.parent == data_root:
-                if parent.name.lower() == "train":
-                    continue
-                return parent.name
     return input_path.stem
 
 
 def resolve_truth_file(input_path: Path, truth_file: str | None, dataset_id: str, experiment_track: str) -> str:
     if truth_file:
-        return str(Path(truth_file).resolve())
+        return str(resolve_train_input_path(truth_file, project_root=Config.DATA_DIR.parent).resolve())
     if experiment_track == "stable_release" and Config.STABLE_RELEASE_LABEL_FILE.exists():
         return str(Config.STABLE_RELEASE_LABEL_FILE.resolve())
-    if input_path.parent.name == "labels":
-        return str(input_path.resolve())
-    for candidate in (
-        Config.DATA_DIR / dataset_id / "input" / "labels",
-        Config.DATA_DIR / dataset_id / "labels",
-    ):
-        if candidate.exists():
-            files = sorted(candidate.glob("*.xlsx"))
-            if len(files) == 1:
-                return str(files[0].resolve())
-    return ""
+    return str(input_path.resolve())
 
 
 def determine_session_policy(
@@ -514,10 +477,9 @@ def validate_stable_release_contract(
         raise ValueError(
             f"stable_release requires dataset_id={Config.STABLE_RELEASE_DATASET_ID}, got {dataset_id}"
         )
-    stable_root = Config.STABLE_RELEASE_TASK_DIR.resolve()
     resolved_input = input_path.resolve()
-    if stable_root not in resolved_input.parents and resolved_input != Config.STABLE_RELEASE_LABEL_FILE.resolve():
-        raise ValueError(f"stable_release input must come from {stable_root}, got {resolved_input}")
+    if resolved_input != Config.STABLE_RELEASE_LABEL_FILE.resolve():
+        raise ValueError(f"stable_release input must be {Config.STABLE_RELEASE_LABEL_FILE.resolve()}, got {resolved_input}")
     if task_mode != TaskType.URBAN_RENEWAL:
         raise ValueError("stable_release only supports task_mode=urban_renewal. Use research_matrix for spatial or both.")
     if urban_method != UrbanMethod.THREE_STAGE_HYBRID or not hybrid_llm_assist_enabled:
@@ -1030,10 +992,8 @@ def load_selectable_modes(strategy_registry: PromptStrategyRegistry, args) -> tu
 def choose_task_mode(args) -> None:
     if args.task:
         default_task = TaskType(args.task)
-    elif args.experiment_track == "stable_release":
-        default_task = TaskType.URBAN_RENEWAL
     else:
-        default_task = TaskType.BOTH
+        default_task = TaskType.URBAN_RENEWAL
     args.task = default_task if args.non_interactive else select_task_mode(default_task=default_task)
 
 
@@ -1138,16 +1098,14 @@ def select_run_input(args) -> Path | None:
         print("No input file selected or default file not found.")
         return None
 
-    input_path = Path(args.input).resolve()
-    if not args.non_interactive and args.experiment_track == "stable_release":
-        stable_root = Config.STABLE_RELEASE_TASK_DIR.resolve()
-        resolved_input = input_path.resolve()
-        if stable_root not in resolved_input.parents and resolved_input != Config.STABLE_RELEASE_LABEL_FILE.resolve():
-            print(
-                f"[WARN] stable_release input must come from {stable_root}. "
-                "Switching experiment track to research_matrix."
-            )
-            args.experiment_track = "research_matrix"
+    input_path = resolve_train_input_path(args.input, project_root=Config.DATA_DIR.parent)
+    args.input = str(input_path)
+    if not args.non_interactive and args.experiment_track == "stable_release" and input_path != Config.STABLE_RELEASE_LABEL_FILE.resolve():
+        print(
+            f"[WARN] stable_release input must be {Config.STABLE_RELEASE_LABEL_FILE.resolve()}. "
+            "Switching experiment track to research_matrix."
+        )
+        args.experiment_track = "research_matrix"
     return input_path
 
 
@@ -1213,8 +1171,8 @@ def build_execution_context(args, input_path: Path):
 
 
 def finalize_output_args(args) -> None:
-    if not args.non_interactive:
-        args.output = select_output_mode(task=args.task, preset_output=args.output)
+    if args.output:
+        args.output = str(resolve_managed_output_path(args.output, project_root=Config.DATA_DIR.parent))
 
     if args.strategy is not None:
         print("[WARN] --strategy is deprecated. Use --task instead.")

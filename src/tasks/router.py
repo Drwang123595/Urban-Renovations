@@ -14,7 +14,13 @@ from ..prompting.generator import PromptGenerator
 from ..runtime.config import Config, Schema
 from ..runtime.llm_client import DeepSeekClient
 from ..runtime.memory import ConversationMemory
-from ..runtime.project_paths import ensure_run_layout, run_paths
+from ..runtime.project_paths import (
+    build_merged_prediction_stem,
+    build_spatial_prediction_stem,
+    build_urban_prediction_stem,
+    ensure_run_layout,
+    run_paths,
+)
 from ..spatial.extraction import SpatialExtractionStrategy
 from ..strategies.stepwise_long import StepwiseLongContextStrategy
 from ..urban.hybrid.classifier import UrbanHybridClassifier
@@ -39,6 +45,14 @@ class UrbanMethod(Enum):
     PURE_LLM_API = "pure_llm_api"
     LOCAL_TOPIC_CLASSIFIER = "local_topic_classifier"
     THREE_STAGE_HYBRID = "three_stage_hybrid"
+
+
+def _prediction_task_key(task_type: TaskType | str) -> str:
+    raw_value = task_type.value if isinstance(task_type, TaskType) else str(task_type)
+    task_key = raw_value.strip().lower()
+    if task_key in {"urban_renewal", "spatial", "merged"}:
+        return task_key
+    raise ValueError(f"Unknown prediction task type: {task_type!r}")
 
 
 class TaskRouter:
@@ -244,8 +258,12 @@ class TaskRouter:
         if output_file:
             output_path = Path(output_file)
         else:
-            output_dir = self._default_prediction_dir(task_name, timestamp, run_context)
-            output_path = output_dir / self._build_urban_output_filename(timestamp)
+            output_path = self._default_prediction_file(
+                task_name,
+                timestamp,
+                run_context,
+                task_type=TaskType.URBAN_RENEWAL,
+            )
         self._ensure_output_parent(output_path)
 
         print(f"Reading from {input_path}")
@@ -486,8 +504,12 @@ class TaskRouter:
         if output_file:
             output_path = Path(output_file)
         else:
-            output_dir = self._default_prediction_dir(task_name, timestamp, run_context)
-            output_path = output_dir / f"spatial_{self.spatial_shot_mode}_{timestamp}.xlsx"
+            output_path = self._default_prediction_file(
+                task_name,
+                timestamp,
+                run_context,
+                task_type=TaskType.SPATIAL,
+            )
         self._ensure_output_parent(output_path)
 
         print(f"Reading from {input_path}")
@@ -704,13 +726,47 @@ class TaskRouter:
         task_name: str,
         run_id: str,
         run_context: Optional[Dict[str, Any]] = None,
+        task_type: TaskType | str = TaskType.URBAN_RENEWAL,
     ) -> Path:
         context = run_context or {}
         dataset_id = str(context.get("dataset_id") or task_name)
         experiment_track = str(context.get("experiment_track") or "research_matrix")
-        layout = run_paths(dataset_id, experiment_track, run_id)
+        layout = run_paths(dataset_id, experiment_track, run_id, project_root=self.config.DATA_DIR.parent)
         ensure_run_layout(layout)
-        return layout.prediction_dir
+        return layout.prediction_dir_for_task(_prediction_task_key(task_type))
+
+    def _default_prediction_file(
+        self,
+        task_name: str,
+        run_id: str,
+        run_context: Optional[Dict[str, Any]] = None,
+        task_type: TaskType | str = TaskType.URBAN_RENEWAL,
+    ) -> Path:
+        context = run_context or {}
+        dataset_id = str(context.get("dataset_id") or task_name)
+        task_key = _prediction_task_key(task_type)
+        output_dir = self._default_prediction_dir(task_name, run_id, run_context, task_type=task_key)
+        if task_key == "urban_renewal":
+            stem = build_urban_prediction_stem(
+                dataset_id=dataset_id,
+                urban_method=self.urban_method.value,
+                shot_mode=self.urban_shot_mode if self.urban_method != UrbanMethod.LOCAL_TOPIC_CLASSIFIER else None,
+                llm_assist_enabled=(
+                    bool(context.get("hybrid_llm_assist_enabled", getattr(self, "hybrid_llm_assist_enabled", False)))
+                    if self.urban_method == UrbanMethod.THREE_STAGE_HYBRID
+                    else None
+                ),
+                run_tag=run_id,
+            )
+        elif task_key == "spatial":
+            stem = build_spatial_prediction_stem(
+                dataset_id=dataset_id,
+                spatial_shot=self.spatial_shot_mode,
+                run_tag=run_id,
+            )
+        else:
+            stem = build_merged_prediction_stem(dataset_id=dataset_id, run_tag=run_id)
+        return output_dir / f"{stem}.xlsx"
 
     def _build_urban_output_filename(self, timestamp: str) -> str:
         if self.urban_method == UrbanMethod.LOCAL_TOPIC_CLASSIFIER:
@@ -771,6 +827,10 @@ class TaskRouter:
 
             if output_file:
                 merge_output = Path(output_file)
+            elif urban_path.parent.name == "urban_renewal" and urban_path.parent.parent.name == "predictions":
+                run_dir = urban_path.parent.parent.parent
+                dataset_id = run_dir.parent.parent.parent.name if run_dir.parent.parent.name == "runs" else urban_path.stem
+                merge_output = urban_path.parent.parent / "merged" / f"{build_merged_prediction_stem(dataset_id=dataset_id, run_tag=timestamp)}.xlsx"
             else:
                 merge_output = urban_path.parent / f"merged_{timestamp}.xlsx"
             self._ensure_output_parent(merge_output)

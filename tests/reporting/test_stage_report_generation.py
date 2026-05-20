@@ -30,9 +30,21 @@ def test_stage_report_resolves_current_stable_paths(tmp_path):
 
     assert inputs.dataset_id == DEFAULT_DATASET_ID
     assert inputs.tag == DEFAULT_TAG
-    assert inputs.prediction_file.name == f"urban_renewal_three_stage_hybrid_few_llm_on_{DEFAULT_TAG}.xlsx"
+    assert (
+        inputs.prediction_file.name
+        == f"urban_renovation_v2_0_20260407__urban_renewal__three_stage_hybrid_few_llm_on__{DEFAULT_TAG}.xlsx"
+    )
     assert inputs.eval_summary_file.name == "Eval_Summary.xlsx"
     assert inputs.run_summary_file.name == "Stable_Run_Summary.json"
+
+
+def test_stage_report_defaults_output_to_stable_report_dir(tmp_path):
+    inputs = resolve_report_inputs(_args(tmp_path, output_dir=None))
+
+    assert inputs.output_dir == inputs.run_dir / "reports"
+    assert str(inputs.output_dir).endswith(
+        f"Data\\output\\{DEFAULT_DATASET_ID}\\runs\\stable_release\\{DEFAULT_TAG}\\reports"
+    )
 
 
 def test_stage_report_exports_tables_without_pdf_dependencies(tmp_path):

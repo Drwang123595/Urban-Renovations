@@ -19,6 +19,8 @@ if str(SCRIPT_PROJECT_ROOT) not in sys.path:
 from src.runtime.project_paths import (
     DEFAULT_STABLE_DATASET_ID,
     PROJECT_ROOT,
+    build_unknown_review_stem,
+    build_urban_prediction_stem,
     dataset_paths,
     ensure_dataset_layout,
     ensure_run_layout,
@@ -90,11 +92,19 @@ def resolve_python() -> Path:
 def build_paths(dataset_id: str = DEFAULT_DATASET_ID, tag: str = DEFAULT_TAG) -> StablePaths:
     dataset_layout = dataset_paths(dataset_id)
     run_layout = run_paths(dataset_id, "stable_release", tag)
-    stem = f"urban_renewal_three_stage_hybrid_few_llm_on_{tag}"
+    stem = build_urban_prediction_stem(
+        dataset_id=dataset_id,
+        urban_method="three_stage_hybrid",
+        shot_mode="few",
+        llm_assist_enabled=True,
+        run_tag=tag,
+    )
     labels_file = dataset_layout.label_file
     prediction_file = run_layout.prediction_file(stem)
     eval_summary_file = run_layout.eval_summary_file()
-    unknown_review_file = run_layout.review_dir / f"Unknown_Review_hybrid_llm_on_{tag}.xlsx"
+    unknown_review_file = run_layout.unknown_review_file(
+        build_unknown_review_stem(dataset_id=dataset_id, run_tag=tag)
+    )
     run_summary_file = run_layout.run_summary_file()
     log_file = run_layout.log_file()
     return StablePaths(
@@ -102,7 +112,7 @@ def build_paths(dataset_id: str = DEFAULT_DATASET_ID, tag: str = DEFAULT_TAG) ->
         tag=tag,
         run_dir=run_layout.run_dir,
         labels_file=labels_file,
-        output_dir=run_layout.prediction_dir,
+        output_dir=run_layout.urban_prediction_dir,
         result_dir=run_layout.report_dir,
         review_dir=run_layout.review_dir,
         log_dir=run_layout.log_dir,

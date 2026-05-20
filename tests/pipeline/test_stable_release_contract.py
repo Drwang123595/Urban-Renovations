@@ -21,6 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STABLE_RESULT_DIR = (
     PROJECT_ROOT
     / "Data"
+    / "output"
     / "Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407"
     / "runs"
     / "stable_release"
@@ -30,25 +31,31 @@ STABLE_RESULT_DIR = (
 STABLE_OUTPUT_DIR = (
     PROJECT_ROOT
     / "Data"
+    / "output"
     / "Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407"
     / "runs"
     / "stable_release"
     / DEFAULT_TAG
     / "predictions"
+    / "urban_renewal"
 )
-STABLE_OUTPUT_FILE = STABLE_OUTPUT_DIR / f"urban_renewal_three_stage_hybrid_few_llm_on_{DEFAULT_TAG}.xlsx"
+STABLE_FILE_STEM = (
+    f"urban_renovation_v2_0_20260407__urban_renewal__three_stage_hybrid_few_llm_on__{DEFAULT_TAG}"
+)
+STABLE_OUTPUT_FILE = STABLE_OUTPUT_DIR / f"{STABLE_FILE_STEM}.xlsx"
 STABLE_SUMMARY_FILE = STABLE_RESULT_DIR / "Eval_Summary.xlsx"
 STABLE_UNKNOWN_REVIEW_FILE = (
     PROJECT_ROOT
     / "Data"
+    / "output"
     / "Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407"
     / "runs"
     / "stable_release"
     / DEFAULT_TAG
     / "reviews"
-    / f"Unknown_Review_hybrid_llm_on_{DEFAULT_TAG}.xlsx"
+    / f"unknown_review__urban_renovation_v2_0_20260407__urban_renewal__{DEFAULT_TAG}.xlsx"
 )
-STABLE_FILE_STEM = f"urban_renewal_three_stage_hybrid_few_llm_on_{DEFAULT_TAG}"
+STABLE_EVAL_FILE = STABLE_RESULT_DIR / f"eval__{STABLE_FILE_STEM}.xlsx"
 
 
 def _dependency_names(requirements):
@@ -88,16 +95,21 @@ def test_stable_pipeline_locks_runtime_flags_in_child_env():
 
 def test_project_paths_define_canonical_input_and_run_layout():
     dataset = dataset_paths(DEFAULT_DATASET_ID)
-    assert dataset.labels_dir.name == "labels"
-    assert dataset.labels_dir.parent.name == "input"
+    assert dataset.label_file == PROJECT_ROOT / "Data" / "train" / f"{DEFAULT_DATASET_ID}.xlsx"
+    assert dataset.input_dir == PROJECT_ROOT / "Data" / "train"
+    assert dataset.dataset_dir == PROJECT_ROOT / "Data" / "output" / DEFAULT_DATASET_ID
     assert dataset.runs_dir.name == "runs"
 
     run = run_paths(DEFAULT_DATASET_ID, "stable_release", DEFAULT_TAG)
     assert run.prediction_dir.name == "predictions"
+    assert run.urban_prediction_dir == run.prediction_dir / "urban_renewal"
+    assert run.spatial_prediction_dir == run.prediction_dir / "spatial"
+    assert run.merged_prediction_dir == run.prediction_dir / "merged"
     assert run.report_dir.name == "reports"
     assert run.review_dir.name == "reviews"
     assert run.log_dir.name == "logs"
     assert run.run_dir == dataset.runs_dir / "stable_release" / DEFAULT_TAG
+    assert str(run.run_dir).startswith(str(PROJECT_ROOT / "Data" / "output"))
 
 
 def test_stable_pipeline_gate_thresholds_match_locked_release():
@@ -137,7 +149,11 @@ def test_stable_pipeline_gate_thresholds_match_locked_release():
 def test_readme_locks_current_stable_release():
     readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     assert "Current project contract as of 2026-04-27" in readme
-    assert "Data/<dataset_id>/runs/<track>/<tag>/..." in readme
+    assert "Data/output/<dataset_id>/runs/<track>/<tag>/..." in readme
+    assert "predictions/urban_renewal/" in readme
+    assert "predictions/spatial/" in readme
+    assert "predictions/merged/" in readme
+    assert "Data/train/<dataset_id>.xlsx" in readme
     assert "scripts/pipeline/run_stable_release.py" in readme
     assert "scripts/pipeline/main.py" in readme
     assert "scripts/main.py" not in readme
@@ -184,12 +200,20 @@ def test_stable_release_doc_records_thresholds_and_artifacts():
     assert "This smoke is not a full run and must not be cited as an experiment result." in doc_text
     assert "It uses `local_topic_classifier` only and does not call the LLM API." in doc_text
     assert "--urban-method local_topic_classifier --hybrid-llm-assist off --limit 10" in doc_text
-    assert 'tmp\\stability_smoke\\local_topic_classifier_limit10.xlsx' in doc_text
+    assert (
+        'Data\\output\\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407'
+        '\\runs\\research_matrix\\stability_smoke\\predictions\\urban_renewal\\local_topic_classifier_limit10.xlsx'
+        in doc_text
+    )
     assert "--strict --strict-truth-match --coverage-threshold 0.01" in doc_text
     assert "`scripts/pipeline/main.py` is the Python version launcher" in doc_text
     assert "`scripts/main.py` is the only root-level compatibility entry" not in doc_text
     assert f"runs/stable_release/{DEFAULT_TAG}" in doc_text
-    assert "Data/<dataset_id>/input/labels/<dataset_id>.xlsx" in doc_text
+    assert "Data/train/<dataset_id>.xlsx" in doc_text
+    assert "Data/output/<dataset_id>/runs/<experiment_track>/<run_tag>/" in doc_text
+    assert "predictions/urban_renewal/" in doc_text
+    assert "predictions/spatial/" in doc_text
+    assert "predictions/merged/" in doc_text
     assert "deepseek-v4-flash" in doc_text
     assert "| `three_stage_hybrid + LLM on` | 92.2% | 0.959900 | 0.943350 | 0.951553 | 766 | 156 | 32 | 46 | 38 |" in doc_text
     assert "Precision >= 0.956" in doc_text
@@ -199,6 +223,8 @@ def test_stable_release_doc_records_thresholds_and_artifacts():
 
 def test_stable_release_artifacts_exist():
     assert STABLE_OUTPUT_FILE.exists()
+    assert (STABLE_OUTPUT_FILE.with_suffix(".prompt_manifest.json")).exists()
+    assert STABLE_EVAL_FILE.exists()
     assert STABLE_SUMMARY_FILE.exists()
     assert STABLE_UNKNOWN_REVIEW_FILE.exists()
 

@@ -31,23 +31,39 @@ Current evaluation contract:
 All new stable and research outputs should use one run directory per dataset, track, and tag:
 
 ```text
-Data/<dataset_id>/
-  input/labels/<dataset_id>.xlsx
-  runs/<experiment_track>/<run_tag>/
-    predictions/
-    reports/
-    reviews/
-    logs/
-    Stable_Run_Summary.json
+Data/
+  train/
+    <dataset_id>.xlsx
+  output/
+    <dataset_id>/
+      runs/<experiment_track>/<run_tag>/
+        predictions/
+          urban_renewal/
+          spatial/
+          merged/
+        reports/
+        reviews/
+        logs/
+        Stable_Run_Summary.json
 ```
 
-Canonical labeled input path: `Data/<dataset_id>/input/labels/<dataset_id>.xlsx`.
+Canonical labeled input path: `Data/train/<dataset_id>.xlsx`.
 
-Legacy folders are retained for historical comparison only:
+Canonical run path: `Data/output/<dataset_id>/runs/<experiment_track>/<run_tag>/`.
+
+Prediction task paths:
+
+- city-renewal classification: `predictions/urban_renewal/`
+- spatial recognition: `predictions/spatial/`
+- joined review workbook from both tasks: `predictions/merged/`
+
+Obsolete pre-consolidation paths are retained only as historical references when present:
 
 - `Data/<dataset_id>/labels`
 - `Data/<dataset_id>/output`
 - `Data/<dataset_id>/Result`
+
+Consolidated historical copies live under `Data/output/<dataset_id>/legacy_output` and `Data/output/<dataset_id>/legacy_result`. The current `Data` top level should contain only `train/` and `output/`; new runs must not write to obsolete dataset folders.
 
 ## Locked stable release
 
@@ -57,13 +73,13 @@ Legacy folders are retained for historical comparison only:
 - Stable mode: `three_stage_hybrid --hybrid-llm-assist on`
 - Stable model: `deepseek-v4-flash`
 - Stable result directory:
-  - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reports`
+  - `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reports`
 - Stable output:
-  - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/predictions/urban_renewal_three_stage_hybrid_few_llm_on_20260427_deepseek_v4_flash_stable.xlsx`
+  - `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/predictions/urban_renewal/urban_renovation_v2_0_20260407__urban_renewal__three_stage_hybrid_few_llm_on__20260427_deepseek_v4_flash_stable.xlsx`
 - Stable review pool:
-  - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reviews/Unknown_Review_hybrid_llm_on_20260427_deepseek_v4_flash_stable.xlsx`
+  - `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reviews/unknown_review__urban_renovation_v2_0_20260407__urban_renewal__20260427_deepseek_v4_flash_stable.xlsx`
 - Stable run summary (auditable runtime + family gate metadata):
-  - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/Stable_Run_Summary.json`
+  - `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/Stable_Run_Summary.json`
 
 ## Locked metrics
 
@@ -137,9 +153,9 @@ Local stability smoke only:
 - Because `--limit 10` covers only 1% of the 1000-row truth workbook, strict evaluation must lower the coverage threshold to `0.01`.
 
 ```powershell
-.venv-bertopic313\Scripts\python.exe scripts\pipeline\main_py313.py --non-interactive --task urban_renewal --experiment-track research_matrix --input "Data\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\input\labels\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --truth-file "Data\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\input\labels\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --urban-method local_topic_classifier --hybrid-llm-assist off --limit 10 --output "tmp\stability_smoke\local_topic_classifier_limit10.xlsx"
+.venv-bertopic313\Scripts\python.exe scripts\pipeline\main_py313.py --non-interactive --task urban_renewal --experiment-track research_matrix --input "Data\train\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --truth-file "Data\train\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --urban-method local_topic_classifier --hybrid-llm-assist off --limit 10 --output "Data\output\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\runs\research_matrix\stability_smoke\predictions\urban_renewal\local_topic_classifier_limit10.xlsx"
 
-.venv-bertopic313\Scripts\python.exe scripts\evaluation\evaluate.py --experiment-track research_matrix --truth "Data\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\input\labels\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --pred "tmp\stability_smoke\local_topic_classifier_limit10.xlsx" --report-dir "tmp\stability_smoke\reports" --pred-scope urban_renewal --strict --strict-truth-match --coverage-threshold 0.01
+.venv-bertopic313\Scripts\python.exe scripts\evaluation\evaluate.py --experiment-track research_matrix --truth "Data\train\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx" --pred "Data\output\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\runs\research_matrix\stability_smoke\predictions\urban_renewal\local_topic_classifier_limit10.xlsx" --report-dir "Data\output\Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407\runs\research_matrix\stability_smoke\reports" --pred-scope urban_renewal --strict --strict-truth-match --coverage-threshold 0.01
 ```
 
 Long-context comparison rule:

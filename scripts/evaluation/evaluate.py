@@ -42,6 +42,7 @@ from src.prompting.manifest import (
     manifest_path_for_output,
 )
 from src.runtime.config import Config, Schema
+from src.runtime.project_paths import resolve_managed_output_path, validate_path_segment
 from src.reporting.metric_name_catalog import metric_dictionary_frame, rename_columns_for_display
 from src.urban.urban_family_gate import load_family_gate_metadata
 from src.urban.urban_training_contract import allowed_training_workbooks, assert_training_source_contract
@@ -225,10 +226,10 @@ def _unique_metadata_value(frame: pd.DataFrame, column: str) -> str:
 
 def list_tasks():
     tasks = []
-    if not Config.DATA_DIR.exists():
+    if not Config.DATA_OUTPUT_DIR.exists():
         return tasks
-    for path in Config.DATA_DIR.iterdir():
-        if path.is_dir() and path.name != "train":
+    for path in sorted(Config.DATA_OUTPUT_DIR.iterdir(), key=lambda item: item.name.lower()):
+        if path.is_dir() and not path.name.startswith("_"):
             tasks.append(path)
     return tasks
 
@@ -324,11 +325,11 @@ def _scope_match(file_name: str, pred_scope: str) -> bool:
     if pred_scope == "all":
         return True
     if pred_scope == "urban_renewal":
-        return lower_name.startswith("urban_renewal_")
+        return lower_name.startswith("urban_renewal_") or "__urban_renewal__" in lower_name
     if pred_scope == "spatial":
-        return lower_name.startswith("spatial_")
+        return lower_name.startswith("spatial_") or "__spatial__" in lower_name
     if pred_scope == "merged":
-        return lower_name.startswith("merged_")
+        return lower_name.startswith("merged_") or "__merged__" in lower_name
     return True
 
 
@@ -356,6 +357,49 @@ def collect_pred_files(
     if not pred_files:
         raise FileNotFoundError(f"No prediction files found in {pred_dir} (scope={pred_scope})")
     return pred_files
+
+
+def _prediction_subdir_name(pred_scope: str) -> str:
+    scope = str(pred_scope or "urban_renewal").strip().lower()
+    if scope in {"urban_renewal", "spatial", "merged"}:
+        return scope
+    return "urban_renewal"
+
+
+def _discover_latest_prediction_dir(task_dir: Path, pred_scope: str = "urban_renewal") -> Path | None:
+    runs_dir = task_dir / "runs"
+    if not runs_dir.exists():
+        return None
+    subdir = _prediction_subdir_name(pred_scope)
+    candidates = [path for path in runs_dir.glob(f"*/*/predictions/{subdir}") if path.is_dir()]
+    if not candidates:
+        candidates = [path for path in runs_dir.glob("*/*/predictions") if path.is_dir()]
+        if not candidates:
+            return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def _default_prediction_dir_for_task(task_name: str, task_dir: Path, pred_scope: str = "urban_renewal") -> Path:
+    discovered = _discover_latest_prediction_dir(task_dir, pred_scope=pred_scope)
+    if discovered is not None:
+        return discovered
+
+    managed_legacy = task_dir / "legacy_output"
+    if managed_legacy.exists():
+        return managed_legacy
+
+    old_legacy = Config.DATA_DIR / task_name / "output"
+    if old_legacy.exists():
+        return old_legacy
+    return managed_legacy
+
+
+def _default_report_dir_for_prediction(task_dir: Path, prediction_dir: Path) -> Path:
+    if prediction_dir.parent.name == "predictions":
+        return prediction_dir.parent.parent / "reports"
+    if prediction_dir.name == "predictions":
+        return prediction_dir.parent / "reports"
+    return task_dir / "legacy_result"
 
 
 def evaluate_one_file(
@@ -467,7 +511,7 @@ def evaluate_one_file(
         alignment.merged,
         source_name=pred_file.stem,
     )
-    report_path = report_dir / f"Eval_{pred_file.name}"
+    report_path = report_dir / f"eval__{pred_file.name}"
     with pd.ExcelWriter(report_path, engine="openpyxl") as writer:
         detail_df.to_excel(writer, sheet_name="Detail Comparison", index=False)
         metrics_df.to_excel(writer, sheet_name="Quality Metrics", index=False)
@@ -983,7 +1027,7 @@ def build_group_summaries(
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Offline evaluator for prediction files against ground truth")
-    parser.add_argument("--task", type=str, default=None, help="Task folder under Data/, e.g. test1")
+    parser.add_argument("--task", type=str, default=None, help="Dataset folder under Data/output/, e.g. test1")
     parser.add_argument(
         "--experiment-track",
         type=str,
@@ -1017,10 +1061,13 @@ def parse_args():
 
 def _resolve_evaluation_context(args):
     task_dir = None
+    task_name = None
     if args.task:
-        task_dir = Config.DATA_DIR / args.task
-        if not task_dir.exists():
-            raise FileNotFoundError(f"Task directory does not exist: {task_dir}")
+        task_name = validate_path_segment(args.task, field_name="task")
+        task_dir = Config.DATA_OUTPUT_DIR / task_name
+        old_prediction_dir = Config.DATA_DIR / task_name / "output"
+        if not task_dir.exists() and not old_prediction_dir.exists():
+            raise FileNotFoundError(f"Task output directory does not exist: {task_dir}")
     elif not args.truth and not args.pred and not args.pred_dir:
         tasks = list_tasks()
         selected = select_from_list(tasks, prompt="Available Tasks:")
@@ -1028,15 +1075,20 @@ def _resolve_evaluation_context(args):
             print("No task selected.")
             return None
         task_dir = selected
+        task_name = selected.name
 
     if task_dir:
-        labels_dir = task_dir / "labels"
-        default_output_dir = task_dir / "output"
-        default_report_dir = task_dir / "Result"
+        labels_dir = Config.TRAIN_DIR
+        default_output_dir = _default_prediction_dir_for_task(
+            task_name or task_dir.name,
+            task_dir,
+            pred_scope=getattr(args, "pred_scope", "urban_renewal"),
+        )
+        default_report_dir = _default_report_dir_for_prediction(task_dir, default_output_dir)
     else:
-        labels_dir = Path(".")
+        labels_dir = Config.TRAIN_DIR
         default_output_dir = None
-        default_report_dir = Path("Result")
+        default_report_dir = Config.DATA_OUTPUT_DIR / "_adhoc" / "reports"
     return labels_dir, default_output_dir, default_report_dir
 
 
@@ -1409,7 +1461,11 @@ def evaluate():
     pred_files = collect_pred_files(args.pred, args.pred_dir, default_output_dir, args.pred_scope)
     truth_files = resolve_truth_files(labels_dir, args.truth, experiment_track=args.experiment_track)
 
-    report_dir = Path(args.report_dir) if args.report_dir else default_report_dir
+    report_dir = (
+        resolve_managed_output_path(args.report_dir, project_root=Config.DATA_DIR.parent)
+        if args.report_dir
+        else default_report_dir
+    )
     report_dir.mkdir(parents=True, exist_ok=True)
     _print_evaluation_inputs(truth_files, pred_files, args.pred_scope, report_dir)
 

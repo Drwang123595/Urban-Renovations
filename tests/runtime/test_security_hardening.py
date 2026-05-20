@@ -11,7 +11,19 @@ from scripts.dev.debug_probe_llm import _build_env_snapshot
 from src.runtime.config import Config, Schema
 from src.runtime.llm_client import DeepSeekClient
 from src.runtime.memory import ConversationMemory
-from src.runtime.project_paths import dataset_paths, run_paths, validate_path_segment
+from src.runtime.project_paths import (
+    build_merged_prediction_stem,
+    build_spatial_prediction_stem,
+    build_urban_prediction_stem,
+    dataset_paths,
+    dataset_slug,
+    output_root,
+    resolve_managed_output_path,
+    resolve_train_input_path,
+    run_paths,
+    train_root,
+    validate_path_segment,
+)
 from src.prompting.generator import PromptGenerator
 from src.strategies.geo_resolver import GeoResolver
 from src.strategies.spatial import SpatialExtractionStrategy
@@ -302,8 +314,74 @@ def test_project_path_segments_allow_local_dataset_names_with_spaces_and_chinese
     dataset = dataset_paths(segment, project_root=tmp_path)
     run = run_paths(segment, "stable_release", "baseline_20260427", project_root=tmp_path)
 
-    assert dataset.dataset_dir == tmp_path / "Data" / segment
+    assert dataset.label_file == tmp_path / "Data" / "train" / f"{segment}.xlsx"
+    assert dataset.dataset_dir == tmp_path / "Data" / "output" / segment
     assert run.run_dir == dataset.runs_dir / "stable_release" / "baseline_20260427"
+
+
+def test_project_paths_enforce_train_input_and_output_roots(tmp_path):
+    train_file = tmp_path / "Data" / "train" / "sample.xlsx"
+    train_file.parent.mkdir(parents=True)
+    train_file.write_bytes(b"placeholder")
+
+    assert train_root(tmp_path) == tmp_path / "Data" / "train"
+    assert output_root(tmp_path) == tmp_path / "Data" / "output"
+    assert resolve_train_input_path("sample.xlsx", project_root=tmp_path) == train_file
+    assert resolve_train_input_path(train_file, project_root=tmp_path) == train_file
+
+    managed_output = resolve_managed_output_path(
+        "Data/output/demo/runs/research_matrix/tag/predictions/out.xlsx",
+        project_root=tmp_path,
+    )
+    assert managed_output == (
+        tmp_path
+        / "Data"
+        / "output"
+        / "demo"
+        / "runs"
+        / "research_matrix"
+        / "tag"
+        / "predictions"
+        / "out.xlsx"
+    )
+
+    with pytest.raises(ValueError, match="Data/train"):
+        resolve_train_input_path(tmp_path / "outside.xlsx", project_root=tmp_path)
+    with pytest.raises(ValueError, match="Data/output"):
+        resolve_managed_output_path(tmp_path / "outside.xlsx", project_root=tmp_path)
+
+
+def test_output_naming_helpers_build_readable_disambiguated_stems():
+    dataset_id = "Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407"
+    assert dataset_slug(dataset_id) == "urban_renovation_v2_0_20260407"
+    assert dataset_slug("全量测试文件.xlsx") == "dataset"
+    assert dataset_slug("Demo 20260520") == "demo_20260520"
+
+    assert (
+        build_urban_prediction_stem(
+            dataset_id=dataset_id,
+            urban_method="three_stage_hybrid",
+            run_tag="20260427_deepseek_v4_flash_stable",
+            shot_mode="few",
+            llm_assist_enabled=True,
+        )
+        == "urban_renovation_v2_0_20260407__urban_renewal__three_stage_hybrid_few_llm_on__20260427_deepseek_v4_flash_stable"
+    )
+    assert (
+        build_spatial_prediction_stem(
+            dataset_id=dataset_id,
+            spatial_shot="zero",
+            run_tag="20260520_150000",
+        )
+        == "urban_renovation_v2_0_20260407__spatial__zero__20260520_150000"
+    )
+    assert (
+        build_merged_prediction_stem(
+            dataset_id=dataset_id,
+            run_tag="20260520_150000",
+        )
+        == "urban_renovation_v2_0_20260407__merged__urban_renewal_spatial__20260520_150000"
+    )
 
 
 def test_stable_release_config_paths_reject_unsafe_tags():

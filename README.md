@@ -50,31 +50,43 @@ Canonical project data layout:
 
 ```text
 Data/
-  <dataset_id>/
-    input/
-      labels/              # read-only truth and labeled input workbooks
-    runs/
-      <experiment_track>/
-        <run_tag>/
-          predictions/     # model or pipeline prediction workbooks
-          reports/         # Eval_*.xlsx and Eval_Summary.xlsx
-          reviews/         # Unknown_Review and manual review workbooks
-          logs/            # run logs
-          Stable_Run_Summary.json
-  train/                   # research and development training workbooks
-output/
-  models/                  # local model artifacts used by the current code
-history/
-  sessions/                # optional prompt/session audit traces
+  train/                   # read-only input workbooks selected by users and scripts
+    <dataset_id>.xlsx
+  output/
+    <dataset_id>/
+      runs/
+        <experiment_track>/
+          <run_tag>/
+            predictions/   # model or pipeline prediction workbooks
+              urban_renewal/
+              spatial/
+              merged/
+            reports/       # eval__<prediction_stem>.xlsx and Eval_Summary.xlsx
+            reviews/       # unknown_review__*.xlsx and manual review workbooks
+            logs/          # run logs
+            Stable_Run_Summary.json
+      analysis/            # consolidated historical analysis outputs
+      legacy_output/       # consolidated files from obsolete Data/<dataset_id>/output paths
+      legacy_result/       # consolidated files from obsolete Data/<dataset_id>/Result paths
+      bundles/             # consolidated deliverable/progress bundles
 ```
 
-Compatibility note: older `Data/<dataset_id>/labels`, `Data/<dataset_id>/output`, and `Data/<dataset_id>/Result` folders are retained as historical archives only. New stable runs must use `Data/<dataset_id>/runs/<track>/<tag>/...`.
+New managed run paths must use `Data/output/<dataset_id>/runs/<track>/<tag>/...`. Prediction workbooks are partitioned by task under `predictions/urban_renewal/`, `predictions/spatial/`, and `predictions/merged/`.
+
+Root-level `output/` remains only for non-data runtime artifacts such as local models.
+
+Compatibility note: obsolete `Data/<dataset_id>/labels`, `Data/<dataset_id>/output`, and `Data/<dataset_id>/Result` paths are historical read-only references only. The current `Data` top level should contain only `train/` and `output/`.
 
 Truth and data contract:
 
-- stable release uses only `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/input/labels`
+- input workbooks live in `Data/train/`
+- canonical labeled input path is `Data/train/<dataset_id>.xlsx`
+- `--input "Urban Renovation V2.0.xlsx"` resolves to `Data/train/Urban Renovation V2.0.xlsx`
+- `--input Data/train/<file>.xlsx` is allowed
+- `--input` outside `Data/train` is rejected
+- custom run outputs must be under `Data/output`
+- stable release uses `Data/train/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407.xlsx`
 - `test1-test7_merged` is historical baseline only
-- labels are read-only truth sources
 - official summary conclusions must come from `scripts/evaluation/evaluate.py` and `Eval_Summary.xlsx`
 
 Metric scale contract:
@@ -98,11 +110,11 @@ Long-context comparison contract:
 Locked performance-optimal stable release:
 
 - Output:
-  - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/predictions/urban_renewal_three_stage_hybrid_few_llm_on_20260427_deepseek_v4_flash_stable.xlsx`
+  - `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/predictions/urban_renewal/urban_renovation_v2_0_20260407__urban_renewal__three_stage_hybrid_few_llm_on__20260427_deepseek_v4_flash_stable.xlsx`
 - Summary:
-  - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reports/Eval_Summary.xlsx`
+  - `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reports/Eval_Summary.xlsx`
 - Unknown review pool:
-  - `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reviews/Unknown_Review_hybrid_llm_on_20260427_deepseek_v4_flash_stable.xlsx`
+  - `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/reviews/unknown_review__urban_renovation_v2_0_20260407__urban_renewal__20260427_deepseek_v4_flash_stable.xlsx`
 
 Stable release metrics:
 
@@ -127,7 +139,7 @@ Use `--force` only when intentionally re-running the live 1000-sample classifica
 
 Reference full-matrix baseline for comparison:
 
-- historical archive: `Data/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/Result/baseline_20260409_finalstable`
+- historical archive: `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/legacy_result/baseline_20260409_finalstable`
 
 ## Release gates
 

@@ -5,7 +5,8 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.runtime.config import Schema
+from src.runtime.config import Config, Schema
+from src.runtime.project_paths import run_paths
 from src.tasks.merged_output import (
     REVIEW_BINARY_EVIDENCE_COLUMN,
     REVIEW_BINARY_POLICY_ACTION_COLUMN,
@@ -100,6 +101,84 @@ def test_run_both_executes_strict_serial(monkeypatch, tmp_path):
     assert result["urban_renewal"].name == "urban.xlsx"
     assert result["spatial"].name == "spatial.xlsx"
     assert result["merged"].name == "merged.xlsx"
+
+
+def test_task_router_default_prediction_dirs_are_partitioned_by_task(tmp_path):
+    router = TaskRouter.__new__(TaskRouter)
+    router.config = type("Cfg", (), {"DATA_DIR": tmp_path / "Data"})()
+    run_context = {
+        "dataset_id": "demo_dataset",
+        "experiment_track": "research_matrix",
+    }
+
+    urban_dir = TaskRouter._default_prediction_dir(
+        router,
+        "demo_dataset",
+        "run_001",
+        run_context,
+        task_type="urban_renewal",
+    )
+    spatial_dir = TaskRouter._default_prediction_dir(
+        router,
+        "demo_dataset",
+        "run_001",
+        run_context,
+        task_type="spatial",
+    )
+    merged_dir = TaskRouter._default_prediction_dir(
+        router,
+        "demo_dataset",
+        "run_001",
+        run_context,
+        task_type="merged",
+    )
+    layout = run_paths("demo_dataset", "research_matrix", "run_001", project_root=tmp_path)
+
+    assert urban_dir == layout.urban_prediction_dir
+    assert spatial_dir == layout.spatial_prediction_dir
+    assert merged_dir == layout.merged_prediction_dir
+
+
+def test_task_router_default_prediction_names_include_dataset_task_and_run_tag(tmp_path):
+    router = TaskRouter.__new__(TaskRouter)
+    router.config = type("Cfg", (), {"DATA_DIR": tmp_path / "Data"})()
+    router.urban_method = UrbanMethod.THREE_STAGE_HYBRID
+    router.urban_shot_mode = "few"
+    router.spatial_shot_mode = "zero"
+    run_context = {
+        "dataset_id": "Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407",
+        "experiment_track": "research_matrix",
+        "hybrid_llm_assist_enabled": True,
+    }
+
+    urban_name = TaskRouter._default_prediction_file(
+        router,
+        "input-stem",
+        "20260520_150000",
+        run_context,
+        task_type="urban_renewal",
+    ).name
+    spatial_name = TaskRouter._default_prediction_file(
+        router,
+        "input-stem",
+        "20260520_150000",
+        run_context,
+        task_type="spatial",
+    ).name
+    merged_name = TaskRouter._default_prediction_file(
+        router,
+        "input-stem",
+        "20260520_150000",
+        run_context,
+        task_type="merged",
+    ).name
+
+    assert (
+        urban_name
+        == "urban_renovation_v2_0_20260407__urban_renewal__three_stage_hybrid_few_llm_on__20260520_150000.xlsx"
+    )
+    assert spatial_name == "urban_renovation_v2_0_20260407__spatial__zero__20260520_150000.xlsx"
+    assert merged_name == "urban_renovation_v2_0_20260407__merged__urban_renewal_spatial__20260520_150000.xlsx"
 
 
 def test_prepare_frame_for_run_honors_canonical_title_order():
@@ -596,3 +675,55 @@ def test_merge_results_creates_nested_explicit_output_parent(tmp_path):
 
     assert result == merged_path
     assert merged_path.exists()
+
+
+def test_merge_results_auto_names_canonical_merged_output_with_dataset_slug(tmp_path):
+    pred_root = (
+        tmp_path
+        / "Data"
+        / "output"
+        / "Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407"
+        / "runs"
+        / "research_matrix"
+        / "run_001"
+        / "predictions"
+    )
+    urban_dir = pred_root / "urban_renewal"
+    spatial_dir = pred_root / "spatial"
+    urban_dir.mkdir(parents=True)
+    spatial_dir.mkdir(parents=True)
+    urban_path = urban_dir / "urban.xlsx"
+    spatial_path = spatial_dir / "spatial.xlsx"
+
+    pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "A",
+                Schema.ABSTRACT: "Urban renewal abstract",
+                Schema.IS_URBAN_RENEWAL: "1",
+            }
+        ]
+    ).to_excel(urban_path, index=False, engine="openpyxl")
+    pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "A",
+                Schema.IS_SPATIAL: "1",
+                Schema.SPATIAL_LEVEL: "7. Single-city / Municipal Scale",
+                Schema.SPATIAL_DESC: "A City",
+            }
+        ]
+    ).to_excel(spatial_path, index=False, engine="openpyxl")
+
+    router = TaskRouter.__new__(TaskRouter)
+    result = TaskRouter._merge_results(
+        router,
+        urban_path=urban_path,
+        spatial_path=spatial_path,
+        timestamp="20260520_160000",
+    )
+
+    assert result == pred_root / "merged" / (
+        "urban_renovation_v2_0_20260407__merged__urban_renewal_spatial__20260520_160000.xlsx"
+    )
+    assert result.exists()

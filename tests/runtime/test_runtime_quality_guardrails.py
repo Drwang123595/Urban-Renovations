@@ -1,11 +1,13 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from scripts.evaluation.evaluate import (
+    _resolve_evaluation_context,
     build_group_summaries,
     build_long_context_stability,
     build_prediction_guardrails,
@@ -13,10 +15,11 @@ from scripts.evaluation.evaluate import (
     collect_pred_files,
     evaluate_one_file,
     flatten_diagnostics,
+    list_tasks,
     resolve_truth_files,
     resolve_truth_for_prediction,
 )
-from src.runtime.config import Schema
+from src.runtime.config import Config, Schema
 from src.evaluation.metrics import align_truth_pred, evaluate_merged, summarize_chunked_binary_metrics
 from src.tasks.router import TaskRouter
 
@@ -54,17 +57,130 @@ class _DummyMemory:
 
 def test_collect_pred_files_default_urban_scope(tmp_path):
     (tmp_path / "urban_renewal_zero_1.xlsx").touch()
+    (tmp_path / "demo__urban_renewal__local_topic_classifier__run001.xlsx").touch()
     (tmp_path / "spatial_zero_1.xlsx").touch()
     (tmp_path / "merged_1.xlsx").touch()
     (tmp_path / "Eval_urban_renewal_zero_1.xlsx").touch()
+    (tmp_path / "eval__urban_renewal_zero_1.xlsx").touch()
     (tmp_path / "~$urban_renewal_zero_1.xlsx").touch()
     files = collect_pred_files(pred_dir_arg=str(tmp_path), pred_scope="urban_renewal")
     names = [file.name for file in files]
     assert "urban_renewal_zero_1.xlsx" in names
+    assert "demo__urban_renewal__local_topic_classifier__run001.xlsx" in names
     assert "merged_1.xlsx" not in names
     assert "spatial_zero_1.xlsx" not in names
     assert "Eval_urban_renewal_zero_1.xlsx" not in names
+    assert "eval__urban_renewal_zero_1.xlsx" not in names
     assert "~$urban_renewal_zero_1.xlsx" not in names
+
+
+def test_evaluate_one_file_writes_lowercase_eval_report_prefix(tmp_path):
+    truth_df = pd.DataFrame(
+        {
+            Schema.TITLE: ["A"],
+            Schema.ABSTRACT: ["A abstract"],
+            Schema.IS_URBAN_RENEWAL: [1],
+        }
+    )
+    pred_file = tmp_path / "demo__urban_renewal__local_topic_classifier__run001.xlsx"
+    pd.DataFrame(
+        {
+            Schema.TITLE: ["A"],
+            Schema.ABSTRACT: ["A abstract"],
+            Schema.IS_URBAN_RENEWAL: [1],
+        }
+    ).to_excel(pred_file, index=False, engine="openpyxl")
+
+    evaluated = evaluate_one_file(
+        truth_df=truth_df,
+        pred_file=pred_file,
+        report_dir=tmp_path,
+        strict=True,
+        coverage_threshold=0.8,
+        spatial_desc_threshold=0.6,
+        chunk_size=100,
+    )
+
+    assert evaluated[-1] == tmp_path / "eval__demo__urban_renewal__local_topic_classifier__run001.xlsx"
+
+
+def test_evaluation_lists_managed_output_datasets_only(monkeypatch, tmp_path):
+    data_dir = tmp_path / "Data"
+    output_dir = data_dir / "output"
+    (data_dir / "train").mkdir(parents=True)
+    (data_dir / "old_dataset").mkdir()
+    (output_dir / "demo").mkdir(parents=True)
+    (output_dir / "_manifests").mkdir()
+
+    monkeypatch.setattr(Config, "DATA_DIR", data_dir)
+    monkeypatch.setattr(Config, "DATA_OUTPUT_DIR", output_dir, raising=False)
+
+    assert list_tasks() == [output_dir / "demo"]
+
+
+def test_evaluation_context_uses_train_truth_and_latest_run_reports(monkeypatch, tmp_path):
+    data_dir = tmp_path / "Data"
+    train_dir = data_dir / "train"
+    output_dir = data_dir / "output"
+    prediction_dir = output_dir / "demo" / "runs" / "research_matrix" / "tag" / "predictions" / "urban_renewal"
+    prediction_dir.mkdir(parents=True)
+    (prediction_dir / "urban_renewal_demo.xlsx").touch()
+    train_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(Config, "DATA_DIR", data_dir)
+    monkeypatch.setattr(Config, "DATA_OUTPUT_DIR", output_dir, raising=False)
+    monkeypatch.setattr(Config, "TRAIN_DIR", train_dir)
+
+    labels_dir, default_output_dir, default_report_dir = _resolve_evaluation_context(
+        SimpleNamespace(task="demo", truth=None, pred=None, pred_dir=None, pred_scope="urban_renewal")
+    )
+
+    assert labels_dir == train_dir
+    assert default_output_dir == prediction_dir
+    assert default_report_dir == prediction_dir.parent.parent / "reports"
+
+
+def test_evaluation_context_uses_spatial_task_prediction_dir(monkeypatch, tmp_path):
+    data_dir = tmp_path / "Data"
+    train_dir = data_dir / "train"
+    output_dir = data_dir / "output"
+    prediction_dir = output_dir / "demo" / "runs" / "research_matrix" / "tag" / "predictions" / "spatial"
+    prediction_dir.mkdir(parents=True)
+    (prediction_dir / "spatial_zero_demo.xlsx").touch()
+    train_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(Config, "DATA_DIR", data_dir)
+    monkeypatch.setattr(Config, "DATA_OUTPUT_DIR", output_dir, raising=False)
+    monkeypatch.setattr(Config, "TRAIN_DIR", train_dir)
+
+    labels_dir, default_output_dir, default_report_dir = _resolve_evaluation_context(
+        SimpleNamespace(task="demo", truth=None, pred=None, pred_dir=None, pred_scope="spatial")
+    )
+
+    assert labels_dir == train_dir
+    assert default_output_dir == prediction_dir
+    assert default_report_dir == prediction_dir.parent.parent / "reports"
+
+
+def test_evaluation_context_falls_back_to_managed_legacy_output(monkeypatch, tmp_path):
+    data_dir = tmp_path / "Data"
+    train_dir = data_dir / "train"
+    output_dir = data_dir / "output"
+    legacy_output = output_dir / "demo" / "legacy_output"
+    legacy_output.mkdir(parents=True)
+    train_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(Config, "DATA_DIR", data_dir)
+    monkeypatch.setattr(Config, "DATA_OUTPUT_DIR", output_dir, raising=False)
+    monkeypatch.setattr(Config, "TRAIN_DIR", train_dir)
+
+    labels_dir, default_output_dir, default_report_dir = _resolve_evaluation_context(
+        SimpleNamespace(task="demo", truth=None, pred=None, pred_dir=None, pred_scope="urban_renewal")
+    )
+
+    assert labels_dir == train_dir
+    assert default_output_dir == legacy_output
+    assert default_report_dir == output_dir / "demo" / "legacy_result"
 
 
 def test_evaluation_core_accepts_manual_truth_alias():

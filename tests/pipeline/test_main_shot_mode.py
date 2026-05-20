@@ -11,11 +11,16 @@ from scripts.pipeline.main import (
     build_argument_parser,
     build_run_context,
     choose_task_mode,
+    finalize_output_args,
     get_enabled_shot_modes,
     normalize_hybrid_llm_assist,
     normalize_shot_mode,
     normalize_urban_method,
+    print_startup_overview,
     prepare_experiment_args,
+    resolve_selected_shots,
+    select_input_file,
+    select_run_input,
     resolve_hybrid_llm_assist,
     select_hybrid_llm_assist,
     select_output_mode,
@@ -344,6 +349,137 @@ def test_prepare_experiment_args_respects_explicit_track(monkeypatch):
     prepare_experiment_args(args)
 
     assert args.experiment_track == "legacy_archive"
+
+
+def test_choose_task_mode_defaults_research_matrix_to_urban(monkeypatch):
+    args = build_argument_parser().parse_args([])
+    args.experiment_track = "research_matrix"
+    monkeypatch.setattr("builtins.input", lambda _: "")
+
+    choose_task_mode(args)
+
+    assert args.task == TaskType.URBAN_RENEWAL
+
+
+def test_finalize_output_args_does_not_prompt_for_default_auto_output(monkeypatch):
+    args = build_argument_parser().parse_args([])
+    args.non_interactive = False
+    args.task = TaskType.URBAN_RENEWAL
+    args.output = None
+    monkeypatch.setattr(
+        main_module,
+        "select_output_mode",
+        lambda **_: pytest.fail("default interactive flow should not ask for output mode"),
+    )
+
+    finalize_output_args(args)
+
+    assert args.output is None
+
+
+def test_startup_overview_shows_task_partitioned_prediction_dirs(capsys):
+    print_startup_overview(["zero"], ["zero"])
+
+    output = capsys.readouterr().out
+    assert "predictions/<task_dir>/" in output
+    assert "urban_renewal | spatial | merged" in output
+
+
+def test_resolve_selected_shots_skips_urban_prompt_when_method_does_not_use_prompt(monkeypatch):
+    registry = _build_registry()
+    urban_enabled = registry.list_enabled_strategies(theme="urban_renewal", allow_candidate=False)
+    spatial_enabled = registry.list_enabled_strategies(theme="spatial", allow_candidate=False)
+    args = build_argument_parser().parse_args([])
+    args.task = TaskType.URBAN_RENEWAL
+    args.urban_method = UrbanMethod.LOCAL_TOPIC_CLASSIFIER
+    args.hybrid_llm_assist = False
+    args.non_interactive = False
+    monkeypatch.setattr(
+        main_module,
+        "select_shot_mode",
+        lambda **_: pytest.fail("urban prompt strategy should be skipped for local classifier"),
+    )
+
+    urban_shot, spatial_shot = resolve_selected_shots(args, registry, urban_enabled, spatial_enabled)
+
+    assert urban_shot == "zero"
+    assert spatial_shot == "zero"
+
+
+def test_resolve_selected_shots_for_spatial_prompts_only_for_spatial(monkeypatch):
+    registry = _build_registry()
+    urban_enabled = registry.list_enabled_strategies(theme="urban_renewal", allow_candidate=False)
+    spatial_enabled = registry.list_enabled_strategies(theme="spatial", allow_candidate=False)
+    args = build_argument_parser().parse_args([])
+    args.task = TaskType.SPATIAL
+    args.urban_method = UrbanMethod.THREE_STAGE_HYBRID
+    args.hybrid_llm_assist = True
+    args.non_interactive = False
+    labels: list[str] = []
+
+    def fake_select_shot_mode(**kwargs):
+        labels.append(kwargs["label"])
+        return kwargs["default_mode"]
+
+    monkeypatch.setattr(main_module, "select_shot_mode", fake_select_shot_mode)
+
+    urban_shot, spatial_shot = resolve_selected_shots(args, registry, urban_enabled, spatial_enabled)
+
+    assert labels == ["spatial"]
+    assert urban_shot == "zero"
+    assert spatial_shot == "zero"
+
+
+def test_select_input_file_lists_only_train_workbooks(monkeypatch, tmp_path):
+    data_dir = tmp_path / "Data"
+    train_dir = data_dir / "train"
+    old_dataset_dir = data_dir / "old_dataset" / "input" / "labels"
+    train_dir.mkdir(parents=True)
+    old_dataset_dir.mkdir(parents=True)
+    train_file = train_dir / "train_sample.xlsx"
+    old_file = old_dataset_dir / "old_sample.xlsx"
+    train_file.write_bytes(b"placeholder")
+    old_file.write_bytes(b"placeholder")
+
+    monkeypatch.setattr(Config, "DATA_DIR", data_dir)
+    monkeypatch.setattr(Config, "TRAIN_DIR", train_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+
+    assert select_input_file("stable_release") == str(train_file)
+
+
+def test_select_run_input_resolves_relative_names_to_train_dir(monkeypatch, tmp_path):
+    data_dir = tmp_path / "Data"
+    train_dir = data_dir / "train"
+    train_dir.mkdir(parents=True)
+    train_file = train_dir / "sample.xlsx"
+    train_file.write_bytes(b"placeholder")
+
+    monkeypatch.setattr(Config, "DATA_DIR", data_dir)
+    monkeypatch.setattr(Config, "TRAIN_DIR", train_dir)
+    args = build_argument_parser().parse_args(["--input", "sample.xlsx", "--non-interactive"])
+    args.experiment_track = "research_matrix"
+
+    resolved = select_run_input(args)
+
+    assert resolved == train_file.resolve()
+    assert args.input == str(train_file.resolve())
+
+
+def test_select_run_input_rejects_paths_outside_train(monkeypatch, tmp_path):
+    data_dir = tmp_path / "Data"
+    train_dir = data_dir / "train"
+    train_dir.mkdir(parents=True)
+    outside_file = tmp_path / "outside.xlsx"
+    outside_file.write_bytes(b"placeholder")
+
+    monkeypatch.setattr(Config, "DATA_DIR", data_dir)
+    monkeypatch.setattr(Config, "TRAIN_DIR", train_dir)
+    args = build_argument_parser().parse_args(["--input", str(outside_file), "--non-interactive"])
+    args.experiment_track = "research_matrix"
+
+    with pytest.raises(ValueError, match="Data/train"):
+        select_run_input(args)
 
 
 def test_choose_task_mode_defaults_stable_release_to_urban(monkeypatch):

@@ -15,7 +15,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.pipeline.run_stable_release import DEFAULT_DATASET_ID, DEFAULT_TAG, build_paths
-from src.runtime.project_paths import PROJECT_ROOT
 
 
 REPORT_DEPENDENCY_MESSAGE = (
@@ -47,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-summary", type=Path, default=None, help="Eval_Summary.xlsx override")
     parser.add_argument("--run-summary", type=Path, default=None, help="Stable_Run_Summary.json override")
     parser.add_argument("--unknown-review", type=Path, default=None, help="Unknown review workbook override")
-    parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "pdf")
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--tables", type=Path, default=None, help="Output workbook for report tables")
     parser.add_argument("--pdf", type=Path, default=None, help="Output PDF path")
     parser.add_argument("--no-pdf", action="store_true", help="Only export the source tables workbook")
@@ -58,7 +57,7 @@ def resolve_report_inputs(args: argparse.Namespace) -> StageReportInputs:
     stable_paths = build_paths(dataset_id=args.dataset_id, tag=args.tag)
     report_dir = Path(args.report_dir) if args.report_dir else stable_paths.result_dir
     eval_summary_file = Path(args.eval_summary) if args.eval_summary else report_dir / "Eval_Summary.xlsx"
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir) if args.output_dir else stable_paths.result_dir
     stem = f"urban_renovation_stable_report_{args.tag}"
     return StageReportInputs(
         dataset_id=args.dataset_id,

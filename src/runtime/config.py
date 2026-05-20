@@ -7,7 +7,14 @@ from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 
-from .project_paths import DEFAULT_STABLE_DATASET_ID, dataset_paths, data_root, validate_path_segment
+from .project_paths import (
+    DEFAULT_STABLE_DATASET_ID,
+    dataset_paths,
+    data_root,
+    output_root,
+    train_root,
+    validate_path_segment,
+)
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -61,12 +68,13 @@ class Config:
     
     # Data Paths
     DATA_DIR = data_root(PROJECT_ROOT)
-    TRAIN_DIR = DATA_DIR / "train"
+    TRAIN_DIR = train_root(PROJECT_ROOT)
+    DATA_OUTPUT_DIR = output_root(PROJECT_ROOT)
     EXPERIMENT_TRACKS = ("stable_release", "research_matrix", "legacy_archive")
     STABLE_RELEASE_DATASET_ID = DEFAULT_STABLE_DATASET_ID
     LEGACY_BASELINE_DATASET_ID = "test1-test7_merged"
-    STABLE_RELEASE_TASK_DIR = DATA_DIR / STABLE_RELEASE_DATASET_ID
-    LEGACY_BASELINE_TASK_DIR = DATA_DIR / LEGACY_BASELINE_DATASET_ID
+    STABLE_RELEASE_TASK_DIR = DATA_OUTPUT_DIR / STABLE_RELEASE_DATASET_ID
+    LEGACY_BASELINE_TASK_DIR = DATA_OUTPUT_DIR / LEGACY_BASELINE_DATASET_ID
     STABLE_RELEASE_INPUT_DIR = dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).input_dir
     STABLE_RELEASE_LABELS_DIR = dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).labels_dir
     STABLE_RELEASE_LEGACY_LABELS_DIR = dataset_paths(STABLE_RELEASE_DATASET_ID, PROJECT_ROOT).legacy_labels_dir
@@ -460,12 +468,18 @@ class Config:
     @classmethod
     def stable_release_result_dir(cls, tag: str) -> Path:
         tag = validate_path_segment(tag, field_name="tag")
-        return cls.STABLE_RELEASE_RUNS_DIR / "stable_release" / tag / "reports"
+        return dataset_paths(cls.STABLE_RELEASE_DATASET_ID, cls.PROJECT_ROOT).runs_dir / "stable_release" / tag / "reports"
 
     @classmethod
     def stable_release_output_dir(cls, tag: str) -> Path:
         tag = validate_path_segment(tag, field_name="tag")
-        return cls.STABLE_RELEASE_RUNS_DIR / "stable_release" / tag / "predictions"
+        return (
+            dataset_paths(cls.STABLE_RELEASE_DATASET_ID, cls.PROJECT_ROOT).runs_dir
+            / "stable_release"
+            / tag
+            / "predictions"
+            / "urban_renewal"
+        )
 
     @classmethod
     def validate_runtime_environment(
