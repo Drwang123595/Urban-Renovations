@@ -146,6 +146,18 @@ class EvidenceBundle:
 
 
 @dataclass(frozen=True)
+class FourStepEvidence:
+    core_object_evidence: str = "none"
+    renewal_action_evidence: str = "none"
+    main_subject_evidence: str = "missing_core_object_or_action"
+    risk_evidence: str = "none"
+    auxiliary_evidence: str = "none"
+    positive_evidence: str = "none"
+    negative_evidence: str = "none"
+    llm_semantic_evidence: str = ""
+
+
+@dataclass(frozen=True)
 class StableDecisionResult:
     final_label: str
     urban_flag: str

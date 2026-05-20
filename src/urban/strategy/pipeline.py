@@ -7,6 +7,8 @@ from typing import Any, Mapping
 import pandas as pd
 
 from ...runtime.config import Schema
+from ...runtime.llm_client import LLMQuotaExceededError
+from ...runtime.resume import ResumeCheckpoint
 from ..taxonomy.core import UNKNOWN_TOPIC_GROUP, UNKNOWN_TOPIC_LABEL, topic_group_for_label
 from .decision import StableUrbanDecisionEngine, decide_stable_strategy
 from .evidence import EvidenceBundle
@@ -60,18 +62,31 @@ class StableUrbanStrategy:
         if analyzer is None:
             return evidence
         should_call = getattr(analyzer, "should_call", None)
-        if callable(should_call) and not should_call(rule=evidence.rule, topic=evidence.topic):
+        prechecked = False
+        if callable(should_call):
+            prechecked = bool(should_call(rule=evidence.rule, topic=evidence.topic))
+        if callable(should_call) and not prechecked:
             return evidence
         analyze = getattr(analyzer, "analyze", None)
         if not callable(analyze):
             return evidence
-        llm_evidence = analyze(
-            evidence.article,
-            rule=evidence.rule,
-            topic=evidence.topic,
-            session_path=session_path,
-            audit_metadata=audit_metadata,
-        )
+        try:
+            llm_evidence = analyze(
+                evidence.article,
+                rule=evidence.rule,
+                topic=evidence.topic,
+                session_path=session_path,
+                audit_metadata=audit_metadata,
+                prechecked=prechecked,
+            )
+        except TypeError:
+            llm_evidence = analyze(
+                evidence.article,
+                rule=evidence.rule,
+                topic=evidence.topic,
+                session_path=session_path,
+                audit_metadata=audit_metadata,
+            )
         return evidence.with_llm(llm_evidence)
 
 
@@ -124,21 +139,43 @@ def apply_stable_strategy(
     *,
     mutate_final_fields: bool = False,
     llm_analyzer: Any | None = None,
+    resume_checkpoint: ResumeCheckpoint | None = None,
+    resume_task_type: str = "",
+    resume_run_id: str = "",
+    resume_input_fingerprint: str = "",
 ) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
-    working = frame.copy()
     strategy = StableUrbanStrategy(llm_analyzer=llm_analyzer)
-    for idx, row in working.iterrows():
-        updated = strategy.classify_row(
-            row.to_dict(),
-            mutate_final_fields=mutate_final_fields,
-        )
-        for column, value in updated.items():
-            if column not in working.columns:
-                working[column] = pd.Series([""] * len(working), index=working.index, dtype=object)
-            working.at[idx, column] = value
-    return working
+    updated_rows = []
+    for idx, row in frame.iterrows():
+        resume_key = None
+        if resume_checkpoint is not None and resume_task_type:
+            resume_key = resume_checkpoint.key(
+                row_index=int(idx),
+                task_type=resume_task_type,
+                run_id=resume_run_id,
+                input_fingerprint=resume_input_fingerprint,
+            )
+            completed = resume_checkpoint.completed_row(resume_key)
+            if completed:
+                updated_rows.append(completed)
+                continue
+        try:
+            updated = strategy.classify_row(row.to_dict(), mutate_final_fields=mutate_final_fields)
+        except LLMQuotaExceededError as exc:
+            if resume_checkpoint is not None and resume_key is not None:
+                resume_checkpoint.append_record(
+                    resume_key,
+                    status="quota_exhausted",
+                    row=row.to_dict(),
+                    error=str(exc),
+                )
+            raise
+        if resume_checkpoint is not None and resume_key is not None:
+            resume_checkpoint.append_completed(resume_key, row=updated)
+        updated_rows.append(updated)
+    return pd.DataFrame(updated_rows, index=frame.index)
 
 
 def build_llm_semantic_analyzer(llm_strategy: Any, *, enabled: bool = True) -> LLMSemanticAnalyzer:

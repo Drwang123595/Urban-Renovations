@@ -2,10 +2,12 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.runtime.config import Config, Schema
+from src.runtime.llm_client import LLMQuotaExceededError
 from src.runtime.project_paths import run_paths
 from src.tasks.merged_output import (
     REVIEW_BINARY_EVIDENCE_COLUMN,
@@ -49,6 +51,7 @@ from src.tasks.merged_output import (
     load_task_input_frame,
 )
 from src.tasks.router import TaskRouter, UrbanMethod
+from src.urban.pipeline.postprocess import postprocess_urban_predictions
 from src.urban.taxonomy.core import topic_name_for_label, topic_name_zh_for_label
 
 
@@ -241,6 +244,212 @@ def test_run_urban_method_dispatches_to_pure_llm(tmp_path):
     assert called["method"] == "pure_llm"
     assert called["session_path"] == tmp_path / "session.json"
     assert result[Schema.IS_URBAN_RENEWAL] == "1"
+
+
+def test_run_urban_renewal_resumes_completed_rows_after_quota(tmp_path):
+    input_path = tmp_path / "input.xlsx"
+    output_path = tmp_path / "out.xlsx"
+    pd.DataFrame(
+        [
+            {Schema.TITLE: "A", Schema.ABSTRACT: "a"},
+            {Schema.TITLE: "B", Schema.ABSTRACT: "b"},
+            {Schema.TITLE: "C", Schema.ABSTRACT: "c"},
+        ]
+    ).to_excel(input_path, index=False, engine="openpyxl")
+
+    router = TaskRouter.__new__(TaskRouter)
+    router.config = type("Cfg", (), {"SESSIONS_DIR": tmp_path / "sessions", "DATA_DIR": tmp_path / "Data"})()
+    router.urban_method = UrbanMethod.PURE_LLM_API
+    router.urban_shot_mode = "zero"
+    router.hybrid_llm_assist_enabled = False
+    router._postprocess_urban_prediction_frame = lambda frame, run_context=None: frame
+
+    first_seen = []
+
+    def quota_on_second(title, abstract, metadata, session_path, audit_metadata=None, run_context=None):
+        first_seen.append(title)
+        if title == "B":
+            raise LLMQuotaExceededError("daily limit", status_code=429, code="USAGE_LIMIT_EXCEEDED")
+        return {Schema.IS_URBAN_RENEWAL: "1", "final_label": "1", "urban_flag": "1"}
+
+    router._run_urban_method = quota_on_second
+
+    with pytest.raises(LLMQuotaExceededError):
+        TaskRouter.run_urban_renewal(
+            router,
+            input_file=str(input_path),
+            output_file=str(output_path),
+            run_context={"urban_flow_audit_enabled": False},
+        )
+
+    assert first_seen == ["A", "B"]
+    assert (tmp_path / "out.xlsx.checkpoint.jsonl").exists()
+
+    second_seen = []
+
+    def complete_remaining(title, abstract, metadata, session_path, audit_metadata=None, run_context=None):
+        second_seen.append(title)
+        return {Schema.IS_URBAN_RENEWAL: "0", "final_label": "0", "urban_flag": "0"}
+
+    router._run_urban_method = complete_remaining
+    result_path = TaskRouter.run_urban_renewal(
+        router,
+        input_file=str(input_path),
+        output_file=str(output_path),
+        run_context={"urban_flow_audit_enabled": False},
+    )
+
+    assert result_path == output_path
+    assert second_seen == ["B", "C"]
+    output = pd.read_excel(output_path, engine="openpyxl")
+    assert output[Schema.TITLE].tolist() == ["A", "B", "C"]
+    assert output["final_label"].tolist() == [1, 0, 0]
+
+
+def test_run_spatial_resumes_completed_rows_after_quota_and_preserves_order(tmp_path):
+    input_path = tmp_path / "input.xlsx"
+    output_path = tmp_path / "spatial.xlsx"
+    pd.DataFrame(
+        [
+            {Schema.TITLE: "Duplicate", Schema.ABSTRACT: "first"},
+            {Schema.TITLE: "Duplicate", Schema.ABSTRACT: "second"},
+            {Schema.TITLE: "C", Schema.ABSTRACT: "third"},
+        ]
+    ).to_excel(input_path, index=False, engine="openpyxl")
+
+    router = TaskRouter.__new__(TaskRouter)
+    router.config = type(
+        "Cfg",
+        (),
+        {"SESSIONS_DIR": tmp_path / "sessions", "DATA_DIR": tmp_path / "Data", "MAX_WORKERS": 1},
+    )()
+    router.spatial_shot_mode = "zero"
+
+    first_seen = []
+
+    class FirstSpatialStrategy:
+        def process(self, title, abstract, session_path=None, audit_metadata=None):
+            first_seen.append((title, abstract))
+            if abstract == "second":
+                raise LLMQuotaExceededError("daily limit", status_code=429, code="USAGE_LIMIT_EXCEEDED")
+            return {Schema.IS_SPATIAL: "1", Schema.SPATIAL_LEVEL: "7. Single-city / Municipal Scale", Schema.SPATIAL_DESC: "First City"}
+
+    router.spatial_strategy = FirstSpatialStrategy()
+    with pytest.raises(LLMQuotaExceededError):
+        TaskRouter.run_spatial(
+            router,
+            input_file=str(input_path),
+            output_file=str(output_path),
+            run_context={"order_id": "input_order"},
+        )
+
+    assert first_seen == [("Duplicate", "first"), ("Duplicate", "second")]
+    assert output_path.with_name("spatial.xlsx.checkpoint.jsonl").exists()
+
+    second_seen = []
+
+    class SecondSpatialStrategy:
+        def process(self, title, abstract, session_path=None, audit_metadata=None):
+            second_seen.append((title, abstract))
+            return {Schema.IS_SPATIAL: "1", Schema.SPATIAL_LEVEL: "8. District / County Scale", Schema.SPATIAL_DESC: abstract}
+
+    router.spatial_strategy = SecondSpatialStrategy()
+    TaskRouter.run_spatial(
+        router,
+        input_file=str(input_path),
+        output_file=str(output_path),
+        run_context={"order_id": "input_order"},
+    )
+
+    assert second_seen == [("Duplicate", "second"), ("C", "third")]
+    output = pd.read_excel(output_path, engine="openpyxl")
+    assert output[Schema.TITLE].tolist() == ["Duplicate", "Duplicate", "C"]
+    assert output[Schema.SPATIAL_DESC].tolist() == ["First City", "second", "third"]
+
+
+def test_postprocess_llm_binary_v2_resumes_after_quota(tmp_path):
+    checkpoint_path = tmp_path / "postprocess.checkpoint.jsonl"
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "A",
+                Schema.ABSTRACT: "Urban regeneration of an old district.",
+                "final_label": "1",
+                "urban_flag": "1",
+                Schema.IS_URBAN_RENEWAL: "1",
+                "urban_probability_score": 0.46,
+                "binary_decision_threshold": 0.45,
+                "topic_final_group": "nonurban",
+                "topic_final": "N3",
+            },
+            {
+                Schema.TITLE: "B",
+                Schema.ABSTRACT: "Urban renewal policy in a historic quarter.",
+                "final_label": "1",
+                "urban_flag": "1",
+                Schema.IS_URBAN_RENEWAL: "1",
+                "urban_probability_score": 0.47,
+                "binary_decision_threshold": 0.45,
+                "topic_final_group": "nonurban",
+                "topic_final": "N3",
+            },
+        ]
+    )
+    context = {
+        "urban_binary_workflow_version": "llm_binary_v2",
+        "hybrid_llm_assist_enabled": True,
+        "urban_stable_strategy_enabled": False,
+        "resume_checkpoint": str(checkpoint_path),
+        "resume_run_id": "run-1",
+        "resume_input_fingerprint": "fp-1",
+    }
+
+    class FirstClient:
+        def __init__(self):
+            self.calls = []
+
+        def chat_completion(self, messages, temperature=0.0, max_retries=2):
+            text = messages[-1]["content"]
+            self.calls.append(text)
+            if "[TITLE] B" in text:
+                raise LLMQuotaExceededError("daily limit", status_code=429, code="USAGE_LIMIT_EXCEEDED")
+            return '{"label":"1","confidence":0.91,"decision_type":"core_renewal","object_is_existing_urban":true,"renewal_action_present":true,"action_is_main_subject":true,"background_only":false,"exclusion_risk":"none","evidence":["district"],"reason":"core renewal"}'
+
+    first_client = FirstClient()
+    with pytest.raises(LLMQuotaExceededError):
+        postprocess_urban_predictions(
+            frame,
+            run_context=context,
+            llm_client=first_client,
+            hybrid_llm_assist_enabled=True,
+            urban_method=UrbanMethod.THREE_STAGE_HYBRID,
+        )
+
+    assert len(first_client.calls) == 2
+    assert checkpoint_path.exists()
+
+    class SecondClient:
+        def __init__(self):
+            self.calls = []
+
+        def chat_completion(self, messages, temperature=0.0, max_retries=2):
+            text = messages[-1]["content"]
+            self.calls.append(text)
+            return '{"label":"0","confidence":0.93,"decision_type":"background_only","object_is_existing_urban":false,"renewal_action_present":false,"action_is_main_subject":false,"background_only":true,"exclusion_risk":"background","evidence":["policy"],"reason":"background only"}'
+
+    second_client = SecondClient()
+    result = postprocess_urban_predictions(
+        frame,
+        run_context=context,
+        llm_client=second_client,
+        hybrid_llm_assist_enabled=True,
+        urban_method=UrbanMethod.THREE_STAGE_HYBRID,
+    )
+
+    assert len(second_client.calls) == 1
+    assert "[TITLE] B" in second_client.calls[0]
+    assert result.loc[0, "llm_adjudication_reason"] == "core renewal"
+    assert result.loc[1, "llm_adjudication_reason"] == "background only"
 
 
 def test_run_urban_method_uses_shared_context_for_cross_paper_long_context(tmp_path):

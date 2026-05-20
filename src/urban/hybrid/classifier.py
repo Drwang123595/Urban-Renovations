@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ...runtime.config import Config, Schema
+from ...runtime.llm_client import LLMQuotaExceededError
 from ..topic_model.bertopic_service import BERTopicSignal, UrbanBERTopicService
 from ..topic_model.family_gate import UrbanFamilyGate
 from ..core.metadata import UrbanMetadataRecord, normalize_phrase
@@ -262,6 +263,7 @@ class UrbanHybridClassifier:
         metadata: Optional[Dict[str, Any]] = None,
         session_path: Optional[Path] = None,
         audit_metadata: Optional[Dict[str, Any]] = None,
+        finalize_strategy: bool = True,
     ) -> Dict[str, Any]:
         record, route_result, base = self._stage1_build_rule_baseline(
             title=title,
@@ -274,6 +276,8 @@ class UrbanHybridClassifier:
             route_result=route_result,
         )
         if hard_negative_result is not None:
+            if not finalize_strategy:
+                return hard_negative_result
             return self._apply_stable_strategy_overlay(
                 hard_negative_result,
                 title=title,
@@ -313,6 +317,8 @@ class UrbanHybridClassifier:
             route_result=route_result,
             state=state,
         )
+        if not finalize_strategy:
+            return result
         return self._apply_stable_strategy_overlay(
             result,
             title=title,
@@ -2703,6 +2709,8 @@ class UrbanHybridClassifier:
                     "bertopic_mapped_label_share": bertopic_signal.mapped_label_share,
                 },
             )
+        except LLMQuotaExceededError:
+            raise
         except Exception as error:
             return {
                 "llm_attempted": 1,

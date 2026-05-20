@@ -21,6 +21,23 @@ class EmptyLLMResponseError(RuntimeError):
     """Raised when a provider returns success without usable text."""
 
 
+class LLMQuotaExceededError(RuntimeError):
+    """Raised when a provider reports an exhausted daily/account quota."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        code: str = "",
+        reason: str = "",
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.reason = reason
+
+
 class DeepSeekClient:
     """
     Generic LLM Client wrapper compatible with OpenAI SDK.
@@ -94,6 +111,77 @@ class DeepSeekClient:
             except Exception:
                 return ""
         return ""
+
+    def _quota_error_details(self, error: Exception) -> Optional[Dict[str, Any]]:
+        status_code = getattr(error, "status_code", None)
+        payload = self._extract_error_payload(error) if isinstance(error, APIError) else ""
+        if not payload:
+            body = getattr(error, "body", None)
+            if body:
+                payload = self._shorten(body)
+        if not payload:
+            response = getattr(error, "response", None)
+            if response is not None:
+                try:
+                    payload = self._shorten(response.text)
+                except Exception:
+                    payload = ""
+        combined = " ".join(
+            part
+            for part in (
+                str(error),
+                str(payload or ""),
+            )
+            if part
+        )
+        upper = combined.upper()
+        quota_tokens = (
+            "DAILY_LIMIT_EXCEEDED",
+            "USAGE_LIMIT_EXCEEDED",
+            "QUOTA_EXCEEDED",
+            "INSUFFICIENT_QUOTA",
+            "DAILY USAGE LIMIT EXCEEDED",
+            "TOO MANY REQUESTS",
+        )
+        is_quota = status_code == 429 and any(token in upper for token in quota_tokens)
+        if not is_quota:
+            return None
+        code = ""
+        reason = ""
+        for token in quota_tokens:
+            if token in upper:
+                if token.endswith("_EXCEEDED") or token == "INSUFFICIENT_QUOTA":
+                    code = token
+                reason = token
+                break
+        if "USAGE_LIMIT_EXCEEDED" in upper:
+            code = "USAGE_LIMIT_EXCEEDED"
+        if "DAILY_LIMIT_EXCEEDED" in upper:
+            reason = "DAILY_LIMIT_EXCEEDED"
+        return {
+            "status_code": status_code,
+            "code": code or "RATE_LIMIT_429",
+            "reason": reason or "RATE_LIMIT_429",
+            "message": self._sanitize_diagnostic_text(combined),
+        }
+
+    def _raise_if_quota_exceeded(self, error: Exception) -> None:
+        details = self._quota_error_details(error)
+        if not details:
+            return
+        print(
+            "LLM quota exhausted | "
+            f"status={details['status_code']} | "
+            f"code={details['code']} | "
+            f"reason={details['reason']} | "
+            f"model={self.model} | base_url={self.base_url}"
+        )
+        raise LLMQuotaExceededError(
+            details["message"],
+            status_code=details["status_code"],
+            code=details["code"],
+            reason=details["reason"],
+        ) from error
 
     def _print_api_error_diagnostics(self, error: APIError, attempt: int, max_retries: int):
         status_code = getattr(error, "status_code", None)
@@ -243,9 +331,11 @@ class DeepSeekClient:
                 if attempt < max_retries - 1:
                     time.sleep(2 * (attempt + 1))
             except RateLimitError as e:
+                self._raise_if_quota_exceeded(e)
                 print(f"Rate Limit Hit in fallback (Attempt {attempt+1}/{max_retries}): {e}")
                 time.sleep(5 * (attempt + 1))
             except APIError as e:
+                self._raise_if_quota_exceeded(e)
                 self._print_api_error_diagnostics(e, attempt, max_retries)
                 print(
                     f"API Error in fallback (Attempt {attempt+1}/{max_retries}): "
@@ -279,6 +369,7 @@ class DeepSeekClient:
                 return self._chat_completions_completion(messages, temperature)
                 
             except RateLimitError as e:
+                self._raise_if_quota_exceeded(e)
                 print(f"Rate Limit Hit (Attempt {attempt+1}/{max_retries}): {e}")
                 time.sleep(5 * (attempt + 1)) # Aggressive backoff
 
@@ -304,6 +395,7 @@ class DeepSeekClient:
                     return None
                 
             except APIError as e:
+                self._raise_if_quota_exceeded(e)
                 self._print_api_error_diagnostics(e, attempt, max_retries)
                 print(
                     f"API Error (Attempt {attempt+1}/{max_retries}): "

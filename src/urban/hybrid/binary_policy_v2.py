@@ -107,10 +107,12 @@ class UrbanBinaryPolicyV2:
         llm_client: Optional[DeepSeekClient] = None,
         llm_enabled: bool = False,
         llm_confidence_floor: float = LLM_CONFIDENCE_FLOOR,
+        evidence_only: bool = False,
     ):
         self.llm_client = llm_client
         self.llm_enabled = bool(llm_enabled and llm_client is not None)
         self.llm_confidence_floor = float(llm_confidence_floor)
+        self.evidence_only = bool(evidence_only)
 
     def apply(self, frame: pd.DataFrame) -> pd.DataFrame:
         if frame.empty:
@@ -281,7 +283,8 @@ class UrbanBinaryPolicyV2:
         frame.at[idx, "binary_policy_reason"] = decision.reason
         frame.at[idx, "binary_policy_conflict_type"] = decision.conflict_type
         frame.at[idx, "llm_adjudication_required"] = int(bool(decision.llm_required))
-        self._set_final_label(frame, idx, decision.label)
+        if not self.evidence_only:
+            self._set_final_label(frame, idx, decision.label)
         self._append_source(frame, idx, "binary_policy_v2")
         self._append_explanation(frame, idx, f"policy_v2={decision.action}:{decision.reason}")
 
@@ -324,7 +327,8 @@ class UrbanBinaryPolicyV2:
         if label not in {"0", "1"} or confidence < self.llm_confidence_floor:
             return
 
-        self._set_final_label(frame, idx, label)
+        if not self.evidence_only:
+            self._set_final_label(frame, idx, label)
         if "llm_used" in frame.columns:
             frame.at[idx, "llm_used"] = 1
         self._append_source(frame, idx, "llm_adjudication")

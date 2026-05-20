@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 
 from ...runtime.config import Schema
-from ...runtime.llm_client import DeepSeekClient
+from ...runtime.llm_client import DeepSeekClient, LLMQuotaExceededError
 
 
 PROMPT_VERSION = "llm_binary_v2.0"
@@ -65,6 +65,8 @@ class LlmAdjudicator:
         messages = self._messages(row)
         try:
             raw = self.client.chat_completion(messages, temperature=0.0, max_retries=2)
+        except LLMQuotaExceededError:
+            raise
         except Exception as exc:
             return LlmAdjudicationResult(
                 attempted=True,

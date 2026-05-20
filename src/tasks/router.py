@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .merged_output import build_metric_dictionary_frame, build_review_ready_merged_frame, load_task_input_frame
 from ..prompting.generator import PromptGenerator
 from ..runtime.config import Config, Schema
-from ..runtime.llm_client import DeepSeekClient
+from ..runtime.llm_client import DeepSeekClient, LLMQuotaExceededError
 from ..runtime.memory import ConversationMemory
 from ..runtime.project_paths import (
     build_merged_prediction_stem,
@@ -21,6 +21,7 @@ from ..runtime.project_paths import (
     ensure_run_layout,
     run_paths,
 )
+from ..runtime.resume import ResumeCheckpoint, default_checkpoint_path, input_fingerprint
 from ..spatial.extraction import SpatialExtractionStrategy
 from ..strategies.stepwise_long import StepwiseLongContextStrategy
 from ..urban.hybrid.classifier import UrbanHybridClassifier
@@ -230,6 +231,43 @@ class TaskRouter:
             return 100
         return 10
 
+    def _resume_checkpoint_for_output(
+        self,
+        output_path: Path,
+        run_context: Optional[Dict[str, Any]] = None,
+    ) -> ResumeCheckpoint:
+        raw_path = self._run_context_value(run_context, "resume_checkpoint")
+        path = Path(raw_path) if raw_path else default_checkpoint_path(output_path)
+        return ResumeCheckpoint(path)
+
+    def _ordered_result_rows(self, rows: list[Optional[Dict[str, Any]]]) -> list[Dict[str, Any]]:
+        return [item for item in rows if item]
+
+    def _write_partial_prediction_rows(
+        self,
+        rows: list[Optional[Dict[str, Any]]],
+        output_path: Path,
+    ) -> None:
+        ordered_rows = self._ordered_result_rows(rows)
+        if ordered_rows:
+            write_urban_prediction_checkpoint(ordered_rows, output_path)
+
+    def _record_resume_interruption(
+        self,
+        run_context: Optional[Dict[str, Any]],
+        checkpoint: ResumeCheckpoint,
+        *,
+        completed_rows: int,
+    ) -> None:
+        if run_context is None:
+            return
+        if checkpoint.path is not None:
+            run_context["_last_resume_checkpoint"] = str(checkpoint.path)
+        run_context["_last_resume_completed_rows"] = int(completed_rows)
+
+    def _run_id_for_explicit_output(self, output_path: Path, run_id: str | None) -> str:
+        return run_id or output_path.stem
+
     def _urban_flow_audit_enabled(
         self,
         run_context: Optional[Dict[str, Any]] = None,
@@ -254,10 +292,11 @@ class TaskRouter:
         input_path = Path(input_file) if input_file else self.config.require_default_train_input_file()
         task_name = input_path.stem
 
-        timestamp = run_id or time.strftime("%Y%m%d_%H%M%S")
         if output_file:
             output_path = Path(output_file)
+            timestamp = self._run_id_for_explicit_output(output_path, run_id)
         else:
+            timestamp = run_id or time.strftime("%Y%m%d_%H%M%S")
             output_path = self._default_prediction_file(
                 task_name,
                 timestamp,
@@ -276,10 +315,24 @@ class TaskRouter:
         if limit:
             df = df.head(limit)
 
-        results_list = []
+        rows = list(df.iterrows())
+        fingerprint = input_fingerprint(input_path, rows=len(rows))
+        resume_checkpoint = self._resume_checkpoint_for_output(output_path, run_context=run_context)
+        results_list: list[Optional[Dict[str, Any]]] = [None] * len(rows)
         checkpoint_interval = self._urban_checkpoint_interval(len(df), run_context=run_context)
 
-        for index, row in tqdm(df.iterrows(), total=len(df)):
+        for position, (index, row) in enumerate(tqdm(rows, total=len(rows))):
+            resume_key = resume_checkpoint.key(
+                row_index=int(index),
+                task_type=TaskType.URBAN_RENEWAL.value,
+                run_id=timestamp,
+                input_fingerprint=fingerprint,
+            )
+            existing_row = resume_checkpoint.completed_row(resume_key)
+            if existing_row:
+                results_list[position] = existing_row
+                continue
+
             title = str(row.get(Schema.TITLE, "") or "")
             abstract = str(row.get(Schema.ABSTRACT, "") or "")
 
@@ -299,29 +352,88 @@ class TaskRouter:
                     sample_index=index,
                     run_context=run_context,
                 )
-            result = self._run_urban_method(
-                title,
-                abstract,
-                metadata,
-                session_path,
-                audit_metadata=audit_metadata,
-                run_context=run_context,
-            )
-            results_list.append(
-                self._build_urban_output_row(
+            try:
+                result = self._run_urban_method(
                     title,
                     abstract,
-                    result,
+                    metadata,
+                    session_path,
+                    audit_metadata=audit_metadata,
+                    run_context=run_context,
                 )
+            except LLMQuotaExceededError as exc:
+                completed_rows = len(self._ordered_result_rows(results_list))
+                resume_checkpoint.append_record(
+                    resume_key,
+                    status="quota_exhausted",
+                    row={Schema.TITLE: title, Schema.ABSTRACT: abstract},
+                    error=str(exc),
+                    metadata={"completed_rows": completed_rows},
+                )
+                self._record_resume_interruption(run_context, resume_checkpoint, completed_rows=completed_rows)
+                self._write_partial_prediction_rows(results_list, output_path)
+                print(
+                    "[WARN] LLM quota exhausted; saved resumable checkpoint. "
+                    f"completed_rows={completed_rows} "
+                    f"checkpoint={resume_checkpoint.path}"
+                )
+                raise
+
+            output_row = self._build_urban_output_row(
+                title,
+                abstract,
+                result,
             )
+            results_list[position] = output_row
+            resume_checkpoint.append_completed(resume_key, row=output_row)
 
             if (index + 1) % checkpoint_interval == 0 or (index + 1) == len(df):
-                write_urban_prediction_checkpoint(results_list, output_path)
+                self._write_partial_prediction_rows(results_list, output_path)
 
-        if results_list:
-            final_df = build_urban_prediction_frame(results_list)
-            final_df = self._postprocess_urban_prediction_frame(final_df, run_context=run_context)
+        ordered_results = self._ordered_result_rows(results_list)
+        if ordered_results:
+            final_df = build_urban_prediction_frame(ordered_results)
+            postprocess_context = dict(run_context or {})
+            if resume_checkpoint.path is not None:
+                postprocess_context.setdefault("resume_checkpoint", str(resume_checkpoint.path))
+            postprocess_context.setdefault("resume_run_id", timestamp)
+            postprocess_context.setdefault("resume_input_fingerprint", fingerprint)
+            postprocess_context.setdefault("resume_task_type", TaskType.URBAN_RENEWAL.value)
+            try:
+                final_df = self._postprocess_urban_prediction_frame(final_df, run_context=postprocess_context)
+            except LLMQuotaExceededError as exc:
+                final_df.to_excel(output_path, index=False, engine="openpyxl")
+                self._record_resume_interruption(
+                    run_context,
+                    resume_checkpoint,
+                    completed_rows=len(ordered_results),
+                )
+                resume_checkpoint.write_summary(
+                    extra={
+                        "completed_rows": len(ordered_results),
+                        "output": str(output_path),
+                        "run_id": timestamp,
+                        "task_type": TaskType.URBAN_RENEWAL.value,
+                        "postprocess_status": "quota_exhausted",
+                        "error": str(exc),
+                    }
+                )
+                print(
+                    "[WARN] LLM quota exhausted during urban postprocess; saved resumable checkpoint. "
+                    f"completed_rows={len(ordered_results)} checkpoint={resume_checkpoint.path}"
+                )
+                raise
+            if run_context is not None and "urban_postprocess_layers" in postprocess_context:
+                run_context["urban_postprocess_layers"] = postprocess_context["urban_postprocess_layers"]
             final_df.to_excel(output_path, index=False, engine="openpyxl")
+            resume_checkpoint.write_summary(
+                extra={
+                    "completed_rows": len(ordered_results),
+                    "output": str(output_path),
+                    "run_id": timestamp,
+                    "task_type": TaskType.URBAN_RENEWAL.value,
+                }
+            )
 
         print(f"[INFO] Urban Renewal results saved to: {output_path}")
         return output_path
@@ -383,6 +495,7 @@ class TaskRouter:
                 abstract,
                 metadata=metadata,
                 session_path=session_path,
+                finalize_strategy=False,
             )
         return self.urban_hybrid_classifier.classify(
             title,
@@ -390,6 +503,7 @@ class TaskRouter:
             metadata=metadata,
             session_path=session_path,
             audit_metadata=audit_metadata,
+            finalize_strategy=False,
         )
 
     def _run_urban_pure_llm(
@@ -504,10 +618,11 @@ class TaskRouter:
         input_path = Path(input_file) if input_file else self.config.require_default_train_input_file()
         task_name = input_path.stem
 
-        timestamp = run_id or time.strftime("%Y%m%d_%H%M%S")
         if output_file:
             output_path = Path(output_file)
+            timestamp = self._run_id_for_explicit_output(output_path, run_id)
         else:
+            timestamp = run_id or time.strftime("%Y%m%d_%H%M%S")
             output_path = self._default_prediction_file(
                 task_name,
                 timestamp,
@@ -524,6 +639,8 @@ class TaskRouter:
             df = df.head(limit)
 
         rows = list(df.iterrows())
+        fingerprint = input_fingerprint(input_path, rows=len(rows))
+        resume_checkpoint = self._resume_checkpoint_for_output(output_path, run_context=run_context)
         results_list: list[Optional[Dict[str, Any]]] = [None] * len(rows)
 
         def process_one(position: int, index: int, row: pd.Series) -> tuple[int, Dict[str, Any]]:
@@ -558,24 +675,113 @@ class TaskRouter:
             )
 
         max_workers = max(1, int(self.config.MAX_WORKERS))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(process_one, position, index, row): position
-                for position, (index, row) in enumerate(rows)
-            }
-            for completed, future in enumerate(tqdm(as_completed(futures), total=len(futures)), start=1):
-                position, result_row = future.result()
-                results_list[position] = result_row
-                if completed % 10 == 0 or completed == len(futures):
-                    ordered_rows = [item for item in results_list if item]
-                    temp_df = pd.DataFrame(ordered_rows)
-                    temp_df.to_excel(output_path, index=False, engine="openpyxl")
+        if max_workers == 1:
+            for completed, (position, (index, row)) in enumerate(tqdm(list(enumerate(rows)), total=len(rows)), start=1):
+                resume_key = resume_checkpoint.key(
+                    row_index=int(index),
+                    task_type=TaskType.SPATIAL.value,
+                    run_id=timestamp,
+                    input_fingerprint=fingerprint,
+                )
+                existing_row = resume_checkpoint.completed_row(resume_key)
+                if existing_row:
+                    results_list[position] = existing_row
+                else:
+                    try:
+                        _, result_row = process_one(position, index, row)
+                    except LLMQuotaExceededError as exc:
+                        completed_rows_count = len(self._ordered_result_rows(results_list))
+                        resume_checkpoint.append_record(
+                            resume_key,
+                            status="quota_exhausted",
+                            row={
+                                Schema.TITLE: str(row.get(Schema.TITLE, "") or ""),
+                                Schema.ABSTRACT: str(row.get(Schema.ABSTRACT, "") or ""),
+                            },
+                            error=str(exc),
+                            metadata={"completed_rows": completed_rows_count},
+                        )
+                        self._record_resume_interruption(
+                            run_context,
+                            resume_checkpoint,
+                            completed_rows=completed_rows_count,
+                        )
+                        self._write_partial_prediction_rows(results_list, output_path)
+                        print(
+                            "[WARN] LLM quota exhausted; saved resumable checkpoint. "
+                            f"completed_rows={completed_rows_count} "
+                            f"checkpoint={resume_checkpoint.path}"
+                        )
+                        raise
+                    results_list[position] = result_row
+                    resume_checkpoint.append_completed(resume_key, row=result_row)
+                if completed % 10 == 0 or completed == len(rows):
+                    self._write_partial_prediction_rows(results_list, output_path)
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {}
+                for position, (index, row) in enumerate(rows):
+                    resume_key = resume_checkpoint.key(
+                        row_index=int(index),
+                        task_type=TaskType.SPATIAL.value,
+                        run_id=timestamp,
+                        input_fingerprint=fingerprint,
+                    )
+                    existing_row = resume_checkpoint.completed_row(resume_key)
+                    if existing_row:
+                        results_list[position] = existing_row
+                        continue
+                    future = executor.submit(process_one, position, index, row)
+                    futures[future] = (position, index, row, resume_key)
 
-        if results_list:
-            ordered_rows = [item for item in results_list if item]
-            if ordered_rows:
-                temp_df = pd.DataFrame(ordered_rows)
-                temp_df.to_excel(output_path, index=False, engine="openpyxl")
+                for completed, future in enumerate(tqdm(as_completed(futures), total=len(futures)), start=1):
+                    position, index, row, resume_key = futures[future]
+                    try:
+                        _, result_row = future.result()
+                    except LLMQuotaExceededError as exc:
+                        completed_rows_count = len(self._ordered_result_rows(results_list))
+                        resume_checkpoint.append_record(
+                            resume_key,
+                            status="quota_exhausted",
+                            row={
+                                Schema.TITLE: str(row.get(Schema.TITLE, "") or ""),
+                                Schema.ABSTRACT: str(row.get(Schema.ABSTRACT, "") or ""),
+                            },
+                            error=str(exc),
+                            metadata={"completed_rows": completed_rows_count},
+                        )
+                        self._record_resume_interruption(
+                            run_context,
+                            resume_checkpoint,
+                            completed_rows=completed_rows_count,
+                        )
+                        for pending in futures:
+                            if pending is not future:
+                                pending.cancel()
+                        self._write_partial_prediction_rows(results_list, output_path)
+                        print(
+                            "[WARN] LLM quota exhausted; saved resumable checkpoint. "
+                            f"completed_rows={completed_rows_count} "
+                            f"checkpoint={resume_checkpoint.path}"
+                        )
+                        raise
+                    results_list[position] = result_row
+                    resume_checkpoint.append_completed(resume_key, row=result_row)
+                    if completed % 10 == 0 or completed == len(futures):
+                        self._write_partial_prediction_rows(results_list, output_path)
+
+        ordered_rows = self._ordered_result_rows(results_list)
+        if ordered_rows:
+            temp_df = pd.DataFrame(ordered_rows)
+            temp_df.to_excel(output_path, index=False, engine="openpyxl")
+            resume_checkpoint.write_summary(
+                extra={
+                    "completed_rows": len(ordered_rows),
+                    "output": str(output_path),
+                    "run_id": timestamp,
+                    "task_type": TaskType.SPATIAL.value,
+                }
+            )
 
         print(f"[INFO] Spatial results saved to: {output_path}")
         return output_path

@@ -734,6 +734,67 @@ def test_hybrid_classifier_skips_legacy_family_hint_when_strategy_supports_struc
     assert result["final_label"] == "1"
 
 
+def test_hybrid_classifier_can_defer_stable_strategy_for_batch_postprocess():
+    from src.urban.hybrid import classifier as classifier_module
+
+    strategy = _StructuredSemanticOnlyStrategy()
+    original_classifier = classifier_module.UrbanTopicClassifier
+    classifier_module.UrbanTopicClassifier = lambda: _BoundaryNonurbanClassifier()
+    classifier = UrbanHybridClassifier(
+        strategy,
+        bertopic_service=_NullBERTopicService(),
+        llm_assist_enabled=True,
+    )
+
+    try:
+        result = classifier.classify(
+            "Property-led regeneration and local policy networks",
+            "The article studies regeneration policy and institutional networks.",
+            finalize_strategy=False,
+        )
+    finally:
+        classifier_module.UrbanTopicClassifier = original_classifier
+
+    assert strategy.tasks == []
+    assert result.get("strategy_status", "") == ""
+    assert not str(result.get("decision_source", "")).endswith("stable_strategy")
+
+
+def test_batch_deferred_strategy_calls_structured_llm_once_in_postprocess():
+    from src.urban.hybrid import classifier as classifier_module
+
+    strategy = _StructuredSemanticOnlyStrategy()
+    original_classifier = classifier_module.UrbanTopicClassifier
+    classifier_module.UrbanTopicClassifier = lambda: _BoundaryNonurbanClassifier()
+    classifier = UrbanHybridClassifier(
+        strategy,
+        bertopic_service=_NullBERTopicService(),
+        llm_assist_enabled=True,
+    )
+
+    try:
+        row = classifier.classify(
+            "Property-led regeneration and local policy networks",
+            "The article studies regeneration policy and institutional networks.",
+            finalize_strategy=False,
+        )
+    finally:
+        classifier_module.UrbanTopicClassifier = original_classifier
+
+    frame = pd.DataFrame([{Schema.TITLE: "Property-led regeneration and local policy networks", Schema.ABSTRACT: "The article studies regeneration policy and institutional networks.", **row}])
+    processed = postprocess_urban_predictions(
+        frame,
+        run_context={
+            "urban_stable_strategy_llm_strategy": strategy,
+            "urban_stable_strategy_llm_enabled": True,
+        },
+    )
+
+    assert strategy.tasks == ["urban_renewal_semantic_evidence"]
+    assert processed.loc[0, "strategy_status"] == StableDecisionStatus.LLM_SUPPORTED_POSITIVE.value
+    assert processed.loc[0, "final_label"] == "1"
+
+
 def test_stable_strategy_pipeline_can_use_llm_semantic_evidence_on_boundary_samples():
     analyzer = _BoundarySemanticAnalyzer()
     strategy = StableUrbanStrategy(llm_analyzer=analyzer)

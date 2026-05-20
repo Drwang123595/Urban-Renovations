@@ -5,7 +5,8 @@ from typing import Any
 import pandas as pd
 
 from ...runtime.config import Config, Schema
-from ...runtime.llm_client import DeepSeekClient
+from ...runtime.llm_client import DeepSeekClient, LLMQuotaExceededError
+from ...runtime.resume import ResumeCheckpoint
 from .llm_adjudicator import LlmAdjudicationResult, LlmAdjudicator
 from .llm_triage import HARD_NEGATIVE_REASONS, LlmTriageDecision, LlmTriagePolicy
 
@@ -56,7 +57,15 @@ class LlmBinaryFinalizer:
         self.override_confidence_floor = float(override_confidence_floor)
         self.informative_confidence_floor = float(informative_confidence_floor)
 
-    def apply(self, frame: pd.DataFrame) -> pd.DataFrame:
+    def apply(
+        self,
+        frame: pd.DataFrame,
+        *,
+        resume_checkpoint: ResumeCheckpoint | None = None,
+        resume_task_type: str = "",
+        resume_run_id: str = "",
+        resume_input_fingerprint: str = "",
+    ) -> pd.DataFrame:
         if frame.empty:
             return frame.copy()
 
@@ -68,18 +77,51 @@ class LlmBinaryFinalizer:
                 working[column] = working[column].astype(object)
 
         for idx, row in working.iterrows():
+            resume_key = None
+            if resume_checkpoint is not None and resume_task_type:
+                resume_key = resume_checkpoint.key(
+                    row_index=int(idx),
+                    task_type=resume_task_type,
+                    run_id=resume_run_id,
+                    input_fingerprint=resume_input_fingerprint,
+                )
+                completed = resume_checkpoint.completed_row(resume_key)
+                if completed:
+                    self._apply_completed_row(working, idx, completed)
+                    continue
+
             self._capture_pre_llm_state(working, idx, row)
             triage = self.triage_policy.evaluate(row)
             self._write_triage(working, idx, triage)
             if not triage.should_call or not self.llm_enabled:
                 self._finalize_without_llm(working, idx, row, triage)
+                if resume_checkpoint is not None and resume_key is not None:
+                    resume_checkpoint.append_completed(resume_key, row=working.loc[idx].to_dict())
                 continue
-            adjudication = self.adjudicator.adjudicate(row)
+            try:
+                adjudication = self.adjudicator.adjudicate(row)
+            except LLMQuotaExceededError as exc:
+                if resume_checkpoint is not None and resume_key is not None:
+                    resume_checkpoint.append_record(
+                        resume_key,
+                        status="quota_exhausted",
+                        row=row.to_dict(),
+                        error=str(exc),
+                    )
+                raise
             final_label, final_score, source, reason = self._resolve_label(row, triage, adjudication)
             self._write_adjudication(working, idx, adjudication)
             self._set_binary_result(working, idx, final_label=final_label, final_score=final_score, source=source, reason=reason)
+            if resume_checkpoint is not None and resume_key is not None:
+                resume_checkpoint.append_completed(resume_key, row=working.loc[idx].to_dict())
 
         return working
+
+    def _apply_completed_row(self, frame: pd.DataFrame, idx: Any, completed: dict[str, Any]) -> None:
+        for column, value in completed.items():
+            if column not in frame.columns:
+                frame[column] = pd.Series([""] * len(frame), index=frame.index, dtype=object)
+            frame.at[idx, column] = value
 
     def _capture_pre_llm_state(self, frame: pd.DataFrame, idx: Any, row: pd.Series) -> None:
         frame.at[idx, "pre_llm_label"] = _label(row.get("final_label", row.get("urban_flag", "")))

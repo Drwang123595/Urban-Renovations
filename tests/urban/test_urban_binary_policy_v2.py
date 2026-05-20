@@ -59,6 +59,27 @@ def test_policy_v2_hard_negative_cannot_be_lifted_to_positive():
     assert result.loc[0, "llm_adjudication_required"] == 0
 
 
+def test_policy_v2_evidence_only_does_not_mutate_final_fields():
+    frame = _frame(
+        {
+            "metadata_route_reason": "rural_nonurban",
+            Schema.TITLE: "Rural regeneration and property-led renewal",
+            Schema.ABSTRACT: "This paper studies rural renewal and countryside development.",
+            "topic_final": "U1",
+            "topic_final_group": "urban",
+        }
+    )
+
+    result = UrbanBinaryPolicyV2(evidence_only=True).apply(frame)
+
+    assert result.loc[0, "final_label"] == "1"
+    assert result.loc[0, "urban_flag"] == "1"
+    assert result.loc[0, Schema.IS_URBAN_RENEWAL] == "1"
+    assert result.loc[0, "topic_final"] == "U1"
+    assert result.loc[0, "binary_policy_action"] == "protected_negative"
+    assert result.loc[0, "binary_policy_reason"].startswith("hard_negative:")
+
+
 def test_policy_v2_keeps_generic_unknown_positive_for_conflict_review():
     frame = _frame(
         {

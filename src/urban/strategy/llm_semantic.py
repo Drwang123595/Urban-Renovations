@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any
 
+from ...runtime.llm_client import LLMQuotaExceededError
 from .evidence import ArticleEvidenceInput, LLMSemanticEvidence, RuleEvidence, TopicEvidence
 
 
@@ -42,8 +43,9 @@ class LLMSemanticAnalyzer:
         topic: TopicEvidence,
         session_path: Any = None,
         audit_metadata: dict[str, Any] | None = None,
+        prechecked: bool = False,
     ) -> LLMSemanticEvidence:
-        if not self.should_call(rule=rule, topic=topic):
+        if not prechecked and not self.should_call(rule=rule, topic=topic):
             return LLMSemanticEvidence(attempted=False, used=False)
 
         auxiliary_context = {
@@ -69,6 +71,8 @@ class LLMSemanticAnalyzer:
                 session_path=session_path,
                 audit_metadata=audit_metadata,
             )
+        except LLMQuotaExceededError:
+            raise
         except Exception as exc:
             return LLMSemanticEvidence(attempted=True, used=False, reason=f"exception:{type(exc).__name__}")
 
