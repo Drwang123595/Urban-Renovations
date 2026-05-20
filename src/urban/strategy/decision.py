@@ -52,6 +52,15 @@ class StableUrbanDecisionEngine:
             )
 
         if self._dynamic_candidate_requires_review(evidence):
+            if self._dynamic_candidate_has_core_positive_support(evidence):
+                return self._result(
+                    "1",
+                    self._dynamic_candidate_topic(evidence) or self._best_positive_topic(evidence),
+                    StableDecisionStatus.ACCEPTED_POSITIVE,
+                    "dynamic_positive_candidate_with_core_evidence",
+                    evidence,
+                    confidence=max(evidence.score, evidence.topic.confidence, 0.65),
+                )
             return self._result(
                 evidence.current_label or "0",
                 evidence.current_topic,
@@ -84,33 +93,39 @@ class StableUrbanDecisionEngine:
                 confidence=max(evidence.score, evidence.topic.confidence, evidence.family.family_probability_urban, 0.65),
             )
 
-        if evidence.current_label == "1" and evidence.current_topic_group == UNKNOWN_TOPIC_GROUP:
+        if self._has_strong_multisource_positive_support(evidence):
             return self._result(
                 "1",
-                evidence.current_topic,
-                StableDecisionStatus.UNKNOWN_REVIEW,
-                "unknown_topic_positive_requires_review",
+                self._best_positive_topic(evidence),
+                StableDecisionStatus.ACCEPTED_POSITIVE,
+                "strong_multisource_positive_support",
                 evidence,
-                confidence=max(evidence.score, 0.5),
-                review_flag=1,
-                review_reason="unknown_topic",
-                conflict_type="unknown_positive",
+                confidence=max(evidence.score, evidence.topic.confidence, evidence.family.family_probability_urban, 0.75),
             )
 
         if self._has_positive_conflict(evidence):
             return self._result(
-                "1",
+                "0",
                 evidence.current_topic,
                 StableDecisionStatus.CONFLICT_REVIEW,
-                "conflicting_positive_evidence_requires_review",
+                "conflicting_positive_without_core_evidence_rejected",
                 evidence,
-                confidence=max(evidence.score, 0.5),
+                confidence=max(1.0 - evidence.score, 0.5),
                 review_flag=1,
                 review_reason="strategy_conflict_review",
                 conflict_type=self._conflict_type(evidence),
             )
 
         if evidence.current_label == "1":
+            if evidence.current_topic_group == UNKNOWN_TOPIC_GROUP:
+                return self._result(
+                    "0",
+                    evidence.current_topic,
+                    StableDecisionStatus.ACCEPTED_NEGATIVE,
+                    "unknown_topic_positive_without_core_evidence_rejected",
+                    evidence,
+                    confidence=max(1.0 - evidence.score, 0.5),
+                )
             return self._result(
                 "1",
                 self._best_positive_topic(evidence),
@@ -170,6 +185,15 @@ class StableUrbanDecisionEngine:
             and evidence.family.family_probability_urban >= 0.60
         )
 
+    def _has_strong_multisource_positive_support(self, evidence: EvidenceBundle) -> bool:
+        if self._has_exclusionary_risk(evidence) or evidence.rule.hard_exclusion_reason:
+            return False
+        if evidence.current_label != "1" or evidence.topic.topic_group != "urban":
+            return False
+        if not evidence.rule.has_renewal_action:
+            return False
+        return bool(evidence.family.family_probability_urban >= 0.75 and evidence.score >= evidence.threshold)
+
     def _has_positive_conflict(self, evidence: EvidenceBundle) -> bool:
         if evidence.current_label != "1":
             return False
@@ -192,9 +216,25 @@ class StableUrbanDecisionEngine:
         override_applied = int(bool(evidence.dynamic.get("override_applied", 0)))
         return bool(candidate_label in {"0", "1"} and not override_applied)
 
+    def _dynamic_candidate_has_core_positive_support(self, evidence: EvidenceBundle) -> bool:
+        candidate_label = str(evidence.dynamic.get("candidate_label", "") or "")
+        if candidate_label != "1":
+            return False
+        if self._has_hard_risk(evidence) or evidence.rule.hard_exclusion_reason:
+            return False
+        return bool(evidence.rule.has_renewal_action and evidence.rule.has_existing_urban_object)
+
+    def _dynamic_candidate_topic(self, evidence: EvidenceBundle) -> str:
+        topic = str(evidence.dynamic.get("candidate_topic", "") or "").strip()
+        return topic if topic else ""
+
     def _has_hard_risk(self, evidence: EvidenceBundle) -> bool:
         risks = set(evidence.rule.risk_hits)
         return bool({"rural_risk", "greenfield_risk", "method_only_risk"} & risks)
+
+    def _has_exclusionary_risk(self, evidence: EvidenceBundle) -> bool:
+        risks = set(evidence.rule.risk_hits)
+        return bool({"rural_risk", "greenfield_risk"} & risks)
 
     def _best_positive_topic(self, evidence: EvidenceBundle) -> str:
         if evidence.topic.topic_group == "urban":

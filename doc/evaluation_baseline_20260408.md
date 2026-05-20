@@ -167,13 +167,13 @@ Long-context comparison rule:
 Acceptance thresholds for the stable run:
 
 - `Accuracy >= 88.0`
-- `Precision >= 0.956`
-- `Recall >= 0.940`
-- `F1 >= 0.948`
+- `Precision >= 0.959900`
+- `Recall > 0.943350`
+- `F1 >= 0.951553`
 - `FP <= 34`
-- `FN <= 48`
+- `FN < 46`
 - `Predicted Unknown Count <= 38`
-- `llm_used == 0`
+- `llm_used` is allowed only for structured boundary adjudication and must be covered by `llm_attempted` audit records
 - `unknown_hint_resolution` accuracy `>= 92.0%`
 - explanation coverage `>= 100%`
 - decision rule stack coverage `>= 100%`

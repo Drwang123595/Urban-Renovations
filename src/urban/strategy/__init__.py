@@ -18,7 +18,12 @@ from .contracts import (
 from .decision import StableUrbanDecisionEngine, decide_stable_strategy
 from .llm_semantic import LLMSemanticAnalyzer
 from .output import STABLE_STRATEGY_DEFAULTS, STRATEGY_V3_DEFAULTS
-from .pipeline import StableUrbanStrategy, apply_stable_strategy, build_evidence_bundle_from_row
+from .pipeline import (
+    StableUrbanStrategy,
+    apply_stable_strategy,
+    build_evidence_bundle_from_row,
+    build_llm_semantic_analyzer,
+)
 from .v3 import apply_strategy_v3_shadow, decide_strategy_v3
 
 __all__ = [
@@ -43,6 +48,7 @@ __all__ = [
     "apply_stable_strategy",
     "apply_strategy_v3_shadow",
     "build_evidence_bundle_from_row",
+    "build_llm_semantic_analyzer",
     "decide_stable_strategy",
     "decide_strategy_v3",
 ]

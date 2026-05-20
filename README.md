@@ -10,7 +10,7 @@ Current project contract as of 2026-04-27:
 - Stable model: `deepseek-v4-flash`
 - Primary task shape:
   - `topic_final` is the main output
-  - `urban_flag` / `final_label` are derived from `topic_final`
+  - `urban_flag` / `final_label` are written by the stable evidence strategy
   - topic space is `U1-U15 / N1-N10 / Unknown`
 - BERTopic is auxiliary only:
   - dynamic topic discovery
@@ -20,8 +20,8 @@ Current project contract as of 2026-04-27:
 - LLM is precision-constrained:
   - only used for semantic evidence on difficult or ambiguous samples
   - positive evidence requires an existing urban object, renewal action, and action-as-main-subject
-  - does not overwrite `topic_final`
-  - `llm_used` must remain `0` in the stable release
+  - may support the final decision only when the structured semantic triplet is satisfied
+  - every used LLM adjudication must write `llm_attempted`, `llm_used`, and `llm_semantic_evidence`
 - Stable decision chain is multi-stage (audited via `decision_source`):
   - `stage1_rule`, `rule_model_fusion`
   - `family gate` (offline gate model, participates in family decisions)
@@ -127,7 +127,7 @@ Stable release metrics:
 - `Predicted Unknown Count = 38`
 - `unknown_hint_resolution Accuracy = 94.8980`
 - `llm_attempted = 137`
-- `llm_used = 0`
+- `llm_used = 0` in this historical locked artifact
 
 Stable pipeline command:
 
@@ -187,13 +187,13 @@ Required checks:
 Stable release acceptance thresholds:
 
 - `hybrid + LLM on` accuracy `>= 88.0`
-- `hybrid + LLM on` precision `>= 0.956`
-- `hybrid + LLM on` recall `>= 0.940`
-- `hybrid + LLM on` F1 `>= 0.948`
+- `hybrid + LLM on` precision `>= 0.959900`
+- `hybrid + LLM on` recall `> 0.943350`
+- `hybrid + LLM on` F1 `>= 0.951553`
 - `FP <= 34`
-- `FN <= 48`
+- `FN < 46`
 - `Predicted Unknown Count <= 38`
-- `llm_used == 0`
+- `llm_used` is allowed only for structured boundary adjudication and must be covered by `llm_attempted` audit records
 - `unknown_hint_resolution` subset accuracy `>= 92.0%`
 - explanation coverage `>= 100%`
 - decision rule stack coverage `>= 100%`

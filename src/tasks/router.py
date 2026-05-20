@@ -332,9 +332,13 @@ class TaskRouter:
         *,
         run_context: Optional[Dict[str, Any]] = None,
     ) -> pd.DataFrame:
+        context = run_context if run_context is not None else {}
+        if self.urban_method == UrbanMethod.THREE_STAGE_HYBRID and self.hybrid_llm_assist_enabled:
+            context.setdefault("urban_stable_strategy_llm_strategy", self.urban_renewal_strategy)
+            context.setdefault("urban_stable_strategy_llm_enabled", True)
         return postprocess_urban_predictions(
             frame,
-            run_context=run_context,
+            run_context=context,
             llm_client=self.urban_client,
             hybrid_llm_assist_enabled=self.hybrid_llm_assist_enabled,
             urban_method=self.urban_method,

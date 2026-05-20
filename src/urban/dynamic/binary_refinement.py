@@ -85,6 +85,12 @@ def _safe_int(value: Any, *, default: int = 0) -> int:
         return int(default)
 
 
+def _series_or_default(frame: pd.DataFrame, column: str, default: Any) -> pd.Series:
+    if column in frame.columns:
+        return frame[column]
+    return pd.Series([default] * len(frame), index=frame.index, dtype=object)
+
+
 _WS_RE = re.compile(r"\s+")
 
 
@@ -258,12 +264,15 @@ class DynamicBinaryRefiner:
     def _build_candidate_context(self, working: pd.DataFrame) -> DynamicBinaryCandidateContext:
         """Precompute candidate labels and masks shared by refinement stages."""
 
-        candidate_label_series = working.get("dynamic_binary_candidate_label", pd.Series([""] * len(working)))
+        candidate_label_series = _series_or_default(working, "dynamic_binary_candidate_label", "")
         candidate_label_series = candidate_label_series.fillna("").astype(str).str.strip()
         topic_confidence_series = pd.to_numeric(
-            working.get("dynamic_topic_confidence", 0.0), errors="coerce"
+            _series_or_default(working, "dynamic_topic_confidence", 0.0), errors="coerce"
         ).fillna(0.0)
-        topic_size_series = pd.to_numeric(working.get("dynamic_topic_size", 0), errors="coerce").fillna(0).astype(int)
+        topic_size_series = pd.to_numeric(
+            _series_or_default(working, "dynamic_topic_size", 0),
+            errors="coerce",
+        ).fillna(0).astype(int)
 
         current_label_raw = working.get("final_label")
         if current_label_raw is None:
@@ -331,12 +340,15 @@ class DynamicBinaryRefiner:
 
         if cfg.allow_flip_existing and cfg.require_review_flag_for_flip:
             review_flag = pd.to_numeric(
-                working.get("review_flag_raw", working.get("review_flag", 0)),
+                working.get("review_flag_raw", _series_or_default(working, "review_flag", 0)),
                 errors="coerce",
             ).fillna(0).astype(int)
-            score = pd.to_numeric(working.get("urban_probability_score", 0.0), errors="coerce").fillna(0.0)
+            score = pd.to_numeric(
+                _series_or_default(working, "urban_probability_score", 0.0),
+                errors="coerce",
+            ).fillna(0.0)
             threshold = pd.to_numeric(
-                working.get("binary_decision_threshold", float("nan")),
+                _series_or_default(working, "binary_decision_threshold", float("nan")),
                 errors="coerce",
             )
             threshold = threshold.fillna(float(threshold.median()) if threshold.notna().any() else 0.5)

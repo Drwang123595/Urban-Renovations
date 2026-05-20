@@ -51,15 +51,15 @@ STABLE_RUNTIME_FLAG_OVERRIDES = {
 class StableThresholds:
     required_model_name: str = STABLE_MODEL_NAME
     min_accuracy: float = 88.0
-    min_precision: float = 0.956
-    min_recall: float = 0.94
-    min_f1: float = 0.948
+    min_precision: float = 0.9599
+    min_recall: float = 0.943351
+    min_f1: float = 0.951553
     max_fp: int = 34
-    max_fn: int = 48
+    max_fn: int = 45
     max_unknown_count: int = 38
     max_unknown_rate: float = 0.038
     min_unknown_hint_resolution_accuracy: float = 92.0
-    max_llm_used_sum: int = 0
+    max_llm_used_sum: int | None = None
     min_explanation_coverage: float = 1.0
     min_rule_stack_coverage: float = 1.0
     min_binary_evidence_coverage: float = 1.0
@@ -358,7 +358,14 @@ def validate_gates(metrics: dict[str, Any], thresholds: StableThresholds, *, exp
             metrics["unknown_hint_resolution_accuracy"] >= thresholds.min_unknown_hint_resolution_accuracy,
             "unknown_hint_resolution accuracy below stable threshold",
         ),
-        (metrics["llm_used_sum"] <= thresholds.max_llm_used_sum, "llm_used violates stable release contract"),
+        (
+            thresholds.max_llm_used_sum is None or metrics["llm_used_sum"] <= thresholds.max_llm_used_sum,
+            "llm_used violates stable release contract",
+        ),
+        (
+            metrics["llm_used_sum"] == 0 or metrics["llm_attempted_sum"] >= metrics["llm_used_sum"],
+            "llm_used must be covered by llm_attempted audit records",
+        ),
         (
             metrics["explanation_coverage"] >= thresholds.min_explanation_coverage,
             "decision explanation coverage below stable threshold",

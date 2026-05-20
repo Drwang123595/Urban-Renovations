@@ -571,7 +571,7 @@ def build_pdf(inputs: StageReportInputs, facts: Dict[str, Any], table_export_pat
         ["F1", f"{facts['f1']:.6f}", f">= {facts['thresholds'].get('min_f1', '')}"],
         ["FP / FN", f"{facts['fp']} / {facts['fn']}", f"FP <= {facts['thresholds'].get('max_fp', '')}; FN <= {facts['thresholds'].get('max_fn', '')}"],
         ["Predicted Unknown", str(facts["predicted_unknown_count"]), f"<= {facts['thresholds'].get('max_unknown_count', '')}"],
-        ["LLM attempted / used", f"{facts['llm_attempted_sum']} / {facts['llm_used_sum']}", "stable release requires used = 0"],
+        ["LLM attempted / used", f"{facts['llm_attempted_sum']} / {facts['llm_used_sum']}", "used cases require structured audit"],
         [
             "Explanation coverage",
             _fmt_pct(float(facts["explanation_coverage"])),

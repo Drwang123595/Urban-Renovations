@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
@@ -7,6 +8,8 @@ from ..runtime.llm_client import DeepSeekClient
 from ..runtime.memory import ConversationMemory
 
 class StepwiseLongContextStrategy(ExtractionStrategy):
+    supports_structured_urban_semantic_evidence = True
+
     def __init__(
         self,
         client: DeepSeekClient,
@@ -83,6 +86,22 @@ class StepwiseLongContextStrategy(ExtractionStrategy):
         except Exception as error:
             print(f"[WARN] Failed to persist urban session in {scene}: {error}")
 
+    def _is_semantic_evidence_task(self, auxiliary_context: Optional[Dict[str, Any]]) -> bool:
+        return str((auxiliary_context or {}).get("task", "")).strip() == "urban_renewal_semantic_evidence"
+
+    def _parse_json_output(self, text: str) -> Dict[str, Any]:
+        raw = str(text or "").strip()
+        if not raw:
+            return {}
+        match = re.search(r"\{.*\}", raw, flags=re.S)
+        if not match:
+            return {}
+        try:
+            payload = json.loads(match.group(0))
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def process(
         self,
         title: str,
@@ -104,14 +123,23 @@ class StepwiseLongContextStrategy(ExtractionStrategy):
         )
         results: Dict[str, Any] = {}
 
-        prompt1 = self.prompt_gen.get_step_prompt(
-            1,
-            title,
-            abstract,
-            include_context=True,
-            metadata=metadata,
-            auxiliary_context=auxiliary_context,
-        )
+        semantic_task = self._is_semantic_evidence_task(auxiliary_context)
+        if semantic_task:
+            prompt1 = self.prompt_gen.get_urban_semantic_evidence_prompt(
+                title,
+                abstract,
+                metadata=metadata,
+                auxiliary_context=auxiliary_context,
+            )
+        else:
+            prompt1 = self.prompt_gen.get_step_prompt(
+                1,
+                title,
+                abstract,
+                include_context=True,
+                metadata=metadata,
+                auxiliary_context=auxiliary_context,
+            )
         memory.add_user_message(prompt1)
 
         resp1 = self.client.chat_completion(memory.get_messages())
@@ -125,6 +153,13 @@ class StepwiseLongContextStrategy(ExtractionStrategy):
             }
 
         memory.add_assistant_message(resp1)
+        if semantic_task:
+            results.update(self._parse_json_output(resp1))
+            self._safe_save(memory, "urban_semantic_evidence_completed")
+            if not session_path:
+                self.samples_in_window += 1
+            return results
+
         parsed_label, parse_reason = self._parse_single_output_with_reason(resp1)
         self._safe_save(memory, "urban_sample_completed")
         results["是否属于城市更新研究"] = parsed_label

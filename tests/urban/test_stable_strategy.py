@@ -17,6 +17,44 @@ from src.urban.strategy import (
     decide_stable_strategy,
 )
 from src.urban.pipeline import postprocess as postprocess_module
+from src.urban.topic_model.bertopic_service import BERTopicSignal
+from src.urban.topic_model.local_classifier import TopicPrediction
+
+
+def _prediction(
+    topic_label: str,
+    topic_group: str,
+    *,
+    confidence: float = 0.55,
+    margin: float = 0.2,
+) -> TopicPrediction:
+    return TopicPrediction(
+        topic_label=topic_label,
+        topic_group=topic_group,
+        topic_name="topic",
+        confidence=confidence,
+        matched_terms=[],
+        binary_score=0.0,
+        binary_probability=0.5,
+        margin=margin,
+        top_candidates=[],
+    )
+
+
+class _BoundaryNonurbanClassifier:
+    def predict(self, _record):
+        return _prediction("N3", "nonurban", confidence=0.52, margin=0.15)
+
+
+class _NullBERTopicService:
+    def predict(self, _record):
+        return BERTopicSignal(
+            available=False,
+            status="disabled",
+            mapped_label="",
+            mapped_group="",
+            mapped_name="",
+        )
 
 
 class _NoCallLLMStrategy:
@@ -68,6 +106,27 @@ class _LegacyJSONLLMStrategy:
         }
 
 
+class _StructuredSemanticOnlyStrategy:
+    supports_structured_urban_semantic_evidence = True
+
+    def __init__(self):
+        self.tasks = []
+
+    def process(self, title, abstract, session_path=None, **kwargs):
+        task = str((kwargs.get("auxiliary_context") or {}).get("task", "") or "legacy_family_hint")
+        self.tasks.append(task)
+        return {
+            "label_hint": "1",
+            "confidence": 0.91,
+            "object_is_existing_urban": True,
+            "renewal_action_present": True,
+            "action_is_main_subject": True,
+            "is_background_only": False,
+            "suggested_topic": "U9",
+            "reason": "structured semantic evidence confirms the boundary case",
+        }
+
+
 def test_stable_strategy_protects_hard_exclusion_without_mutating_current_output():
     frame = pd.DataFrame(
         [
@@ -111,9 +170,61 @@ def test_stable_strategy_rejects_generic_governance_without_object_action_relati
 
     decision = decide_stable_strategy(build_evidence_bundle_from_row(row))
 
-    assert decision.final_label == "1"
-    assert decision.status == StableDecisionStatus.UNKNOWN_REVIEW
-    assert "unknown_topic" in decision.reason
+    assert decision.final_label == "0"
+    assert decision.status == StableDecisionStatus.CONFLICT_REVIEW
+    assert "without_core_evidence_rejected" in decision.reason
+
+
+def test_stable_strategy_converts_current_positive_generic_governance_to_negative_when_mutating():
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "City governance and policy networks",
+                Schema.ABSTRACT: "This paper studies city policy discourse and institutional narratives.",
+                Schema.IS_URBAN_RENEWAL: "1",
+                "final_label": "1",
+                "urban_flag": "1",
+                "topic_final": "Unknown",
+                "topic_final_group": "unknown",
+                "urban_probability_score": 0.47,
+                "binary_decision_threshold": 0.45,
+                "binary_topic_consistency_flag": 1,
+            }
+        ]
+    )
+
+    stable = apply_stable_strategy(frame, mutate_final_fields=True)
+
+    assert stable.loc[0, "final_label"] == "0"
+    assert stable.loc[0, "urban_flag"] == "0"
+    assert stable.loc[0, Schema.IS_URBAN_RENEWAL] == "0"
+    assert stable.loc[0, "strategy_status"] == StableDecisionStatus.CONFLICT_REVIEW.value
+    assert "without_core_evidence_rejected" in stable.loc[0, "strategy_reason"]
+
+
+def test_stable_strategy_preserves_binary_decision_source_when_mutating_final_fields():
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "City governance and policy networks",
+                Schema.ABSTRACT: "This paper studies city policy discourse and institutional narratives.",
+                Schema.IS_URBAN_RENEWAL: "1",
+                "final_label": "1",
+                "urban_flag": "1",
+                "topic_final": "Unknown",
+                "topic_final_group": "unknown",
+                "urban_probability_score": 0.47,
+                "binary_decision_threshold": 0.45,
+                "binary_topic_consistency_flag": 1,
+                "binary_decision_source": "binary_confidence_resolution",
+            }
+        ]
+    )
+
+    stable = apply_stable_strategy(frame, mutate_final_fields=True)
+
+    assert stable.loc[0, "decision_source"] == "stable_strategy"
+    assert stable.loc[0, "binary_decision_source"] == "binary_confidence_resolution"
 
 
 def test_stable_strategy_accepts_strong_positive_with_action_and_existing_object():
@@ -202,9 +313,66 @@ def test_stable_strategy_keeps_dynamic_candidate_as_review_without_final_mutatio
     stable = apply_stable_strategy(frame, mutate_final_fields=False)
 
     assert stable.loc[0, "final_label"] == "0"
-    assert stable.loc[0, "strategy_label"] == "0"
-    assert stable.loc[0, "strategy_status"] == StableDecisionStatus.DYNAMIC_CANDIDATE_REVIEW.value
-    assert stable.loc[0, "review_flag"] == 1
+    assert stable.loc[0, "strategy_label"] == "1"
+    assert stable.loc[0, "strategy_status"] == StableDecisionStatus.ACCEPTED_POSITIVE.value
+    assert "dynamic_positive_candidate_with_core_evidence" in stable.loc[0, "strategy_reason"]
+
+
+def test_stable_strategy_accepts_dynamic_positive_candidate_with_core_anchor_when_mutating():
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "Urban regeneration of old districts",
+                Schema.ABSTRACT: "This paper studies urban regeneration and redevelopment of old districts.",
+                Schema.IS_URBAN_RENEWAL: "0",
+                "final_label": "0",
+                "urban_flag": "0",
+                "topic_final": "N4",
+                "topic_final_group": "nonurban",
+                "dynamic_binary_candidate_label": "1",
+                "dynamic_to_fixed_topic_candidate": "U1",
+                "dynamic_binary_override_applied": 0,
+            }
+        ]
+    )
+
+    stable = apply_stable_strategy(frame, mutate_final_fields=True)
+
+    assert stable.loc[0, "final_label"] == "1"
+    assert stable.loc[0, "urban_flag"] == "1"
+    assert stable.loc[0, "topic_final"] == "U1"
+    assert stable.loc[0, "strategy_status"] == StableDecisionStatus.ACCEPTED_POSITIVE.value
+    assert "dynamic_positive_candidate_with_core_evidence" in stable.loc[0, "strategy_reason"]
+
+
+def test_stable_strategy_accepts_method_mixed_case_with_strong_urban_support():
+    row = pd.Series(
+        {
+            Schema.TITLE: "Urban renewal governance evaluation model",
+            Schema.ABSTRACT: "This paper evaluates urban renewal governance using a hybrid quantitative model.",
+            Schema.IS_URBAN_RENEWAL: "1",
+            "final_label": "1",
+            "urban_flag": "1",
+            "topic_final": "U9",
+            "topic_final_group": "urban",
+            "topic_rule": "N8",
+            "topic_rule_group": "nonurban",
+            "topic_local_label": "U9",
+            "topic_local_group": "urban",
+            "family_probability_urban": 0.86,
+            "urban_probability_score": 0.9265,
+            "binary_decision_threshold": 0.45,
+            "stage1_risk_tags": "explicit_renewal_wording_but_other_object",
+            "binary_topic_consistency_flag": 0,
+        }
+    )
+
+    decision = decide_stable_strategy(build_evidence_bundle_from_row(row))
+
+    assert decision.final_label == "1"
+    assert decision.topic_final == "U9"
+    assert decision.status == StableDecisionStatus.ACCEPTED_POSITIVE
+    assert "strong_multisource_positive" in decision.reason
 
 
 def test_urban_output_row_contract_includes_stable_strategy_defaults_and_compat_aliases():
@@ -223,7 +391,7 @@ def test_urban_output_row_contract_includes_stable_strategy_defaults_and_compat_
     assert row["strategy_v3_status"] == ""
 
 
-def test_postprocess_appends_stable_strategy_without_mutating_current_output_by_default():
+def test_postprocess_stable_strategy_is_final_mutating_layer_by_default():
     frame = pd.DataFrame(
         [
             {
@@ -246,9 +414,86 @@ def test_postprocess_appends_stable_strategy_without_mutating_current_output_by_
         run_context={"urban_binary_policy_v2_enabled": False},
     )
 
+    assert processed.loc[0, "final_label"] == "0"
+    assert processed.loc[0, "urban_flag"] == "0"
+    assert processed.loc[0, "strategy_label"] == "0"
+    assert processed.loc[0, "strategy_status"] == StableDecisionStatus.CONFLICT_REVIEW.value
+
+
+def test_postprocess_binary_policy_records_conflict_without_final_label_mutation(monkeypatch):
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "City governance and policy networks",
+                Schema.ABSTRACT: "This paper studies city policy discourse and institutional narratives.",
+                Schema.IS_URBAN_RENEWAL: "1",
+                "final_label": "1",
+                "urban_flag": "1",
+                "topic_final": "Unknown",
+                "topic_final_group": "unknown",
+                "urban_probability_score": 0.47,
+                "binary_decision_threshold": 0.45,
+            }
+        ]
+    )
+
+    original_apply = postprocess_module.UrbanBinaryPolicyV2.apply
+
+    def wrapped_apply(self, incoming):
+        result = original_apply(self, incoming)
+        assert result.loc[0, "final_label"] == "1"
+        return result
+
+    monkeypatch.setattr(postprocess_module.UrbanBinaryPolicyV2, "apply", wrapped_apply)
+
+    processed = postprocess_urban_predictions(frame, run_context={})
+
+    assert processed.loc[0, "binary_policy_action"] in {"conflict_review", "accept_positive"}
+    assert processed.loc[0, "final_label"] == "0"
+    assert processed.loc[0, "strategy_label"] == "0"
+
+
+def test_postprocess_dynamic_binary_records_candidate_without_direct_mutation():
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "Urban regeneration of old districts",
+                Schema.ABSTRACT: "This paper studies urban regeneration and redevelopment of old districts.",
+                Schema.IS_URBAN_RENEWAL: "0",
+                "final_label": "0",
+                "urban_flag": "0",
+                "topic_final": "N4",
+                "topic_final_group": "nonurban",
+                "dynamic_topic_id": "DUR_0001",
+                "dynamic_topic_confidence": 0.95,
+                "dynamic_topic_size": 50,
+                "dynamic_mapping_status": "mapped",
+                "dynamic_to_fixed_topic_candidate": "U1",
+                "dynamic_binary_candidate_label": "1",
+                "dynamic_binary_candidate_action": "promote",
+                "review_flag": 1,
+                "uncertain_nonurban_guard_action": "review",
+            }
+        ]
+    )
+
+    processed = postprocess_urban_predictions(
+        frame,
+        run_context={
+            "dynamic_binary_refinement_enabled": True,
+            "dynamic_binary_refinement_unknown_only": False,
+            "dynamic_binary_refinement_allow_flip": True,
+            "dynamic_topics_min_topic_size": 1,
+            "dynamic_topics_max_topics": 1,
+            "dynamic_binary_refinement_min_topic_size": 1,
+            "dynamic_topics_keyword_fallback_only": True,
+        },
+    )
+
+    assert processed.loc[0, "dynamic_binary_override_applied"] == 0
+    assert processed.loc[0, "dynamic_binary_override_source"] == "dynamic_topic_refiner_flip_review"
     assert processed.loc[0, "final_label"] == "1"
-    assert processed.loc[0, "strategy_label"] == "1"
-    assert processed.loc[0, "strategy_status"] == StableDecisionStatus.UNKNOWN_REVIEW.value
+    assert processed.loc[0, "strategy_reason"] == "dynamic_positive_candidate_with_core_evidence"
 
 
 def test_postprocess_strict_stable_release_raises_when_binary_policy_fails(monkeypatch):
@@ -348,6 +593,84 @@ def test_hybrid_classifier_appends_stable_strategy_explanation_without_mutating_
     assert "renewal_action" in result["positive_evidence"]
 
 
+def test_hybrid_classifier_uses_stable_strategy_llm_for_boundary_final_decision():
+    from src.urban.hybrid import classifier as classifier_module
+
+    original_classifier = classifier_module.UrbanTopicClassifier
+    classifier_module.UrbanTopicClassifier = lambda: _BoundaryNonurbanClassifier()
+    classifier = UrbanHybridClassifier(
+        _LegacyJSONLLMStrategy(),
+        bertopic_service=_NullBERTopicService(),
+        llm_assist_enabled=True,
+    )
+
+    try:
+        result = classifier.classify(
+            "Property-led regeneration and local policy networks",
+            "The article studies regeneration policy and institutional networks.",
+        )
+    finally:
+        classifier_module.UrbanTopicClassifier = original_classifier
+
+    assert result["decision_source"].endswith("stable_strategy")
+    assert result["strategy_status"] == StableDecisionStatus.LLM_SUPPORTED_POSITIVE.value
+    assert result["final_label"] == "1"
+    assert result["llm_attempted"] == 1
+    assert result["llm_used"] == 1
+    assert "object_is_existing_urban=True" in result["llm_semantic_evidence"]
+
+
+def test_hybrid_classifier_calls_llm_only_from_stable_strategy_boundary_layer():
+    from src.urban.hybrid import classifier as classifier_module
+
+    strategy = _LegacyJSONLLMStrategy()
+    original_classifier = classifier_module.UrbanTopicClassifier
+    classifier_module.UrbanTopicClassifier = lambda: _BoundaryNonurbanClassifier()
+    classifier = UrbanHybridClassifier(
+        strategy,
+        bertopic_service=_NullBERTopicService(),
+        llm_assist_enabled=True,
+    )
+
+    try:
+        result = classifier.classify(
+            "Property-led regeneration and local policy networks",
+            "The article studies regeneration policy and institutional networks.",
+        )
+    finally:
+        classifier_module.UrbanTopicClassifier = original_classifier
+
+    assert strategy.calls == 1
+    assert result["strategy_status"] == StableDecisionStatus.LLM_SUPPORTED_POSITIVE.value
+    assert result["llm_family_hint"] == ""
+
+
+def test_hybrid_classifier_skips_legacy_family_hint_when_strategy_supports_structured_semantics():
+    from src.urban.hybrid import classifier as classifier_module
+
+    strategy = _StructuredSemanticOnlyStrategy()
+    original_classifier = classifier_module.UrbanTopicClassifier
+    classifier_module.UrbanTopicClassifier = lambda: _BoundaryNonurbanClassifier()
+    classifier = UrbanHybridClassifier(
+        strategy,
+        bertopic_service=_NullBERTopicService(),
+        llm_assist_enabled=True,
+    )
+
+    try:
+        result = classifier.classify(
+            "Property-led regeneration and local policy networks",
+            "The article studies regeneration policy and institutional networks.",
+        )
+    finally:
+        classifier_module.UrbanTopicClassifier = original_classifier
+
+    assert strategy.tasks == ["urban_renewal_semantic_evidence"]
+    assert result["llm_family_hint"] == ""
+    assert result["strategy_status"] == StableDecisionStatus.LLM_SUPPORTED_POSITIVE.value
+    assert result["final_label"] == "1"
+
+
 def test_stable_strategy_pipeline_can_use_llm_semantic_evidence_on_boundary_samples():
     analyzer = _BoundarySemanticAnalyzer()
     strategy = StableUrbanStrategy(llm_analyzer=analyzer)
@@ -372,6 +695,35 @@ def test_stable_strategy_pipeline_can_use_llm_semantic_evidence_on_boundary_samp
     assert result["strategy_topic"] == "U9"
     assert result["strategy_status"] == StableDecisionStatus.LLM_SUPPORTED_POSITIVE.value
     assert "LLM confirms" in result["llm_semantic_evidence"]
+
+
+def test_stable_strategy_pipeline_uses_llm_to_mutate_uncertain_negative_boundary_sample():
+    analyzer = _BoundarySemanticAnalyzer()
+    strategy = StableUrbanStrategy(llm_analyzer=analyzer)
+
+    result = strategy.classify_row(
+        {
+            Schema.TITLE: "Property-led regeneration and local policy networks",
+            Schema.ABSTRACT: "The article studies regeneration governance for an existing inner-city district.",
+            Schema.IS_URBAN_RENEWAL: "0",
+            "final_label": "0",
+            "urban_flag": "0",
+            "topic_final": "N3",
+            "topic_final_group": "nonurban",
+            "urban_probability_score": 0.49,
+            "binary_decision_threshold": 0.5,
+        },
+        mutate_final_fields=True,
+    )
+
+    assert analyzer.called is True
+    assert result["final_label"] == "1"
+    assert result["urban_flag"] == "1"
+    assert result["topic_final"] == "U9"
+    assert result["decision_source"].endswith("stable_strategy")
+    assert result["strategy_status"] == StableDecisionStatus.LLM_SUPPORTED_POSITIVE.value
+    assert result["llm_attempted"] == 1
+    assert result["llm_used"] == 1
 
 
 def test_llm_semantic_analyzer_supports_legacy_strategy_process_signature():

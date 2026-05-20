@@ -69,6 +69,11 @@ def apply_decision_to_row(
     if not mutate_final_fields:
         return output
 
+    if decision.llm_semantic_evidence:
+        output["llm_attempted"] = max(_coerce_int(output.get("llm_attempted", 0)), 1)
+        if decision.status.value in {"llm_supported_positive", "llm_rejected_boundary"}:
+            output["llm_used"] = max(_coerce_int(output.get("llm_used", 0)), 1)
+
     output[Schema.IS_URBAN_RENEWAL] = decision.final_label
     output["urban_flag"] = decision.urban_flag
     output["final_label"] = decision.final_label
@@ -79,7 +84,6 @@ def apply_decision_to_row(
     output["topic_final_name"] = topic_name_for_label(decision.topic_final)
     output["topic_name"] = topic_name_for_label(decision.topic_final)
     output["decision_source"] = _append_source(output.get("decision_source", ""), "stable_strategy")
-    output["binary_decision_source"] = _append_source(output.get("binary_decision_source", ""), "stable_strategy")
     return output
 
 
@@ -88,3 +92,12 @@ def _append_source(prior: Any, source: str) -> str:
     if source not in parts:
         parts.append(source)
     return "|".join(parts)
+
+
+def _coerce_int(value: Any) -> int:
+    try:
+        if value in (None, ""):
+            return 0
+        return int(float(value))
+    except Exception:
+        return 0

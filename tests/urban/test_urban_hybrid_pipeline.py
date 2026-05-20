@@ -1019,6 +1019,30 @@ def _assert_final_label_follows_binary_score(result):
     assert result[Schema.IS_URBAN_RENEWAL] == expected
 
 
+def _decision_source_parts(result):
+    return {part for part in str(result.get("decision_source", "")).split("|") if part}
+
+
+def _assert_decision_source_contains(result, expected):
+    parts = _decision_source_parts(result)
+    assert expected in parts
+    assert "stable_strategy" in parts
+
+
+def _assert_decision_source_contains_any(result, expected_sources):
+    parts = _decision_source_parts(result)
+    assert parts & set(expected_sources)
+    assert "stable_strategy" in parts
+
+
+def _assert_stable_strategy_rejects_weak_binary_positive(result):
+    assert result["final_label"] == "0"
+    assert result["urban_flag"] == "0"
+    assert result[Schema.IS_URBAN_RENEWAL] == "0"
+    assert result["strategy_label"] == "0"
+    assert result["strategy_status"] in {"conflict_review", "accepted_negative"}
+
+
 def test_hybrid_classifier_short_circuits_stage1_hard_negative(monkeypatch):
     monkeypatch.setattr(
         "src.urban.hybrid.classifier.UrbanTopicClassifier",
@@ -1030,7 +1054,7 @@ def test_hybrid_classifier_short_circuits_stage1_hard_negative(monkeypatch):
         "This paper studies bipartite graph tiling methods and combinatorics.",
     )
     assert result["final_label"] == "0"
-    assert result["decision_source"] == "stage1_rule"
+    _assert_decision_source_contains(result, "stage1_rule")
     assert result["topic_label"] == "N8"
     assert result["topic_final"] == "N8"
     _assert_explainability_contract(result)
@@ -1047,7 +1071,7 @@ def test_hybrid_classifier_uses_rule_model_fusion_when_rule_and_local_agree(monk
         "This paper studies governance, stakeholders and participation in urban renewal implementation.",
     )
     assert result["final_label"] == "1"
-    assert result["decision_source"] == "rule_model_fusion"
+    _assert_decision_source_contains(result, "rule_model_fusion")
     assert result["topic_final"] == "U9"
     assert result["topic_label"] == "U9"
     _assert_explainability_contract(result)
@@ -1064,7 +1088,7 @@ def test_hybrid_classifier_prefers_rule_when_local_unknown(monkeypatch):
         "This article studies redevelopment finance, PPP, and land value capture in urban renewal.",
     )
     assert result["final_label"] == "1"
-    assert result["decision_source"] == "rule_model_fusion"
+    _assert_decision_source_contains(result, "rule_model_fusion")
     assert result["topic_final"] == "U10"
 
 
@@ -1079,7 +1103,7 @@ def test_hybrid_classifier_returns_unknown_for_cross_group_weak_conflict(monkeyp
         "Governance and participation in contested districts",
         "This paper examines governance networks and local institutions in contested districts.",
     )
-    assert result["decision_source"] == "unknown_review"
+    _assert_decision_source_contains(result, "unknown_review")
     assert result["final_label"] in {"0", "1"}
     assert result["urban_flag"] == result["final_label"]
     assert result[Schema.IS_URBAN_RENEWAL] == result["final_label"]
@@ -1155,7 +1179,7 @@ def test_hybrid_classifier_can_disable_llm_for_unknown_review(monkeypatch):
         "Governance and participation in contested districts",
         "This paper examines governance networks and local institutions in contested districts.",
     )
-    assert result["decision_source"] == "unknown_review"
+    _assert_decision_source_contains(result, "unknown_review")
     assert result["final_label"] in {"0", "1"}
     assert result["urban_flag"] == result["final_label"]
     assert result["binary_decision_source"] == "binary_confidence_resolution"
@@ -1201,7 +1225,7 @@ def test_hybrid_classifier_resolves_unknown_when_rule_urban_and_llm_family_align
         "Health impacts in regeneration districts",
         "This paper studies health, well-being and quality of life in regeneration areas.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U15"
     assert result["final_label"] == "1"
     assert result["llm_family_hint"] == "1"
@@ -1219,9 +1243,9 @@ def test_hybrid_classifier_resolves_unknown_when_rule_nonurban_and_llm_family_al
         "Local governance narratives in city policy",
         "This paper studies policy discourse and city governance in a general urban context.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "N3"
-    _assert_final_label_follows_binary_score(result)
+    _assert_stable_strategy_rejects_weak_binary_positive(result)
     assert result["binary_decision_source"] == "binary_confidence_resolution"
     assert float(result["urban_probability_score"]) >= float(result["binary_decision_threshold"])
     assert result["binary_recall_calibration_tier"] == "context_relevance_floor"
@@ -1239,7 +1263,7 @@ def test_hybrid_classifier_offline_recovers_u1_when_online_llm_hints_disabled(mo
         "Urban regeneration strategy in old districts",
         "This paper studies regeneration and implementation in an existing urban district.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U1"
     assert result["final_label"] == "1"
     assert result["llm_attempted"] == 0
@@ -1262,7 +1286,7 @@ def test_hybrid_classifier_offline_recovers_u12_gentrification_without_llm(monke
         "Gentrification and neighborhood transition",
         "This paper studies gentrification and displacement in an existing neighborhood.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U12"
     assert result["final_label"] == "1"
     assert result["unknown_recovery_path"] == "unknown_offline_curated_rule"
@@ -1284,7 +1308,7 @@ def test_hybrid_classifier_offline_recovers_u4_redevelopment_without_llm(monkeyp
         "Urban redevelopment in inner-city districts",
         "This paper studies redevelopment and revitalization in existing downtown areas.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U4"
     assert result["final_label"] == "1"
     assert result["unknown_recovery_path"] == "unknown_offline_curated_rule"
@@ -1306,7 +1330,7 @@ def test_hybrid_classifier_offline_recovers_strong_local_u9_without_llm(monkeypa
         "Coalitions in urban regeneration",
         "This paper studies participation, governance and coalitions in urban regeneration programmes.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U9"
     assert result["final_label"] == "1"
     assert result["unknown_recovery_path"] == "unknown_offline_curated_local"
@@ -1337,7 +1361,7 @@ def test_hybrid_classifier_resolves_cross_group_unknown_with_dual_urban_support(
         "Governance and participation in contested districts",
         "This paper examines governance networks and local institutions in contested districts.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U9"
     assert result["final_label"] == "1"
 
@@ -1353,7 +1377,7 @@ def test_hybrid_classifier_resolves_curated_nonurban_rule_to_strong_local_urban(
         "Coalitions in urban regeneration",
         "This paper studies participation, governance and coalitions in urban regeneration programmes.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U9"
     assert result["final_label"] == "1"
 
@@ -1369,7 +1393,7 @@ def test_hybrid_classifier_resolves_curated_u12_rule_over_housing_market_local(m
         "Gentrification and neighborhood change",
         "This paper studies gentrification, neighborhood change and housing value shifts in an existing city.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U12"
     assert result["final_label"] == "1"
 
@@ -1385,7 +1409,7 @@ def test_hybrid_classifier_resolves_weak_nonurban_rule_when_local_unknown_and_ll
         "Suburban housing and city growth",
         "This paper studies a general city context and suburban growth without renewal intervention.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "N3"
     assert result["final_label"] == "0"
 
@@ -1401,7 +1425,7 @@ def test_hybrid_classifier_resolves_very_weak_nonurban_rule_when_local_unknown_a
         "Suburban growth and city expansion",
         "This paper studies suburban growth and general urban expansion without any renewal project.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "N1"
     assert result["final_label"] == "0"
     assert result["binary_decision_source"] == "binary_confidence_resolution"
@@ -1419,7 +1443,7 @@ def test_hybrid_classifier_resolves_curated_u4_rule_over_n1_local(monkeypatch):
         "Urban redevelopment in downtown districts",
         "This paper studies urban redevelopment and downtown regeneration in an existing built-up area.",
     )
-    assert result["decision_source"] == "unknown_hint_resolution"
+    _assert_decision_source_contains(result, "unknown_hint_resolution")
     assert result["topic_final"] == "U4"
     assert result["final_label"] == "1"
 
@@ -1440,7 +1464,7 @@ def test_hybrid_classifier_family_gate_keeps_unknown_audit_fields_without_forcin
         "Gentrification and neighborhood change",
         "This paper studies gentrification, neighborhood change and housing value shifts in an existing city.",
     )
-    assert result["decision_source"] == "unknown_review"
+    _assert_decision_source_contains(result, "unknown_review")
     assert result["topic_final"] == "Unknown"
     assert result["topic_family_rule"] == "urban"
     assert result["topic_family_local"] == "nonurban"
@@ -1468,7 +1492,7 @@ def test_hybrid_classifier_does_not_override_nonunknown_with_family_gate(monkeyp
         "Urban renewal governance and participation in old districts",
         "This paper studies governance, stakeholders and participation in urban renewal implementation.",
     )
-    assert result["decision_source"] == "rule_model_fusion"
+    _assert_decision_source_contains(result, "rule_model_fusion")
     assert result["topic_final"] == "U9"
     assert result["topic_family_final"] == "urban"
     assert result["family_predicted_family"] == "nonurban"
@@ -1490,7 +1514,7 @@ def test_hybrid_classifier_blocks_family_gate_recovery_when_llm_conflicts(monkey
         "Community impacts in changing districts",
         "This paper studies community impact under weak and ambiguous evidence.",
     )
-    assert result["decision_source"] == "unknown_review"
+    _assert_decision_source_contains(result, "unknown_review")
     assert result["topic_final"] == "Unknown"
     assert result["family_predicted_family"] == "nonurban"
     assert result["unknown_recovery_path"] == "retained_unknown"
@@ -1512,7 +1536,7 @@ def test_anchor_guard_promotes_nonurban_with_core_anchor_and_support(monkeypatch
         "Urban redevelopment governance coalitions in existing districts",
         "This paper examines policy coalitions and governance in urban redevelopment programmes.",
     )
-    assert result["decision_source"] == "anchor_guard_promotion"
+    _assert_decision_source_contains(result, "anchor_guard_promotion")
     assert result["topic_final"] == "U9"
     assert result["final_label"] == "1"
     assert result["anchor_guard_flag"] == 1
@@ -1537,7 +1561,7 @@ def test_anchor_guard_sends_core_anchor_without_support_to_unknown_review(monkey
         "Urban redevelopment discourse in policy narratives",
         "This article studies policy narratives and governance discourse without intervention evidence.",
     )
-    assert result["decision_source"] == "anchor_guard_review"
+    _assert_decision_source_contains(result, "anchor_guard_review")
     assert result["topic_final"] == "N3"
     assert result["final_label"] == "0"
     assert result["review_flag_raw"] == 1
@@ -1564,7 +1588,7 @@ def test_anchor_guard_can_promote_with_urban_within_family_fallback(monkeypatch)
         "Urban redevelopment governance framework",
         "This paper studies urban redevelopment governance in existing districts.",
     )
-    assert result["decision_source"] == "anchor_guard_promotion"
+    _assert_decision_source_contains(result, "anchor_guard_promotion")
     assert result["topic_final"] == "U9"
     assert result["final_label"] == "1"
     assert float(result["urban_probability_score"]) >= float(result["binary_decision_threshold"])
@@ -1588,9 +1612,9 @@ def test_uncertain_nonurban_gate_downgrades_n3_rule_local_agree_to_unknown(monke
         "City governance and policy discourse",
         "This paper studies city governance and policy discourse in general urban contexts.",
     )
-    assert result["decision_source"] == "uncertain_nonurban_review"
+    _assert_decision_source_contains(result, "uncertain_nonurban_review")
     assert result["topic_final"] == "N3"
-    _assert_final_label_follows_binary_score(result)
+    _assert_stable_strategy_rejects_weak_binary_positive(result)
     assert result["uncertain_nonurban_guard_flag"] == 1
     assert result["uncertain_nonurban_guard_action"] == "review"
     assert result["binary_topic_consistency_flag"] == 1
@@ -1615,7 +1639,7 @@ def test_uncertain_nonurban_gate_keeps_n8_technical_without_renewal_signal(monke
     )
     assert result["topic_final"] == "N8"
     assert result["final_label"] == "0"
-    assert result["decision_source"] == "rule_model_fusion"
+    _assert_decision_source_contains(result, "rule_model_fusion")
     assert result["uncertain_nonurban_guard_flag"] == 1
     assert result["uncertain_nonurban_guard_action"] == "keep_0"
 
@@ -1636,10 +1660,10 @@ def test_uncertain_nonurban_gate_promotes_n8_with_renewal_and_strong_urban_local
         "Urban renewal governance evaluation model",
         "This paper evaluates urban renewal governance using a hybrid quantitative model.",
     )
-    assert result["decision_source"] in {"uncertain_nonurban_promotion", "anchor_guard_promotion"}
+    _assert_decision_source_contains_any(result, {"uncertain_nonurban_promotion", "anchor_guard_promotion"})
     assert result["topic_final"] == "U9"
     assert result["final_label"] == "1"
-    if result["decision_source"] == "uncertain_nonurban_promotion":
+    if "uncertain_nonurban_promotion" in _decision_source_parts(result):
         assert result["uncertain_nonurban_guard_flag"] == 1
         assert result["uncertain_nonurban_guard_action"] == "promote"
     else:
@@ -1653,7 +1677,7 @@ def test_anchor_guard_does_not_override_stage1_hard_negative_math():
         "Urban renewal moves in dimer models",
         "This paper studies bipartite graph tiling methods and combinatorics.",
     )
-    assert result["decision_source"] == "stage1_rule"
+    _assert_decision_source_contains(result, "stage1_rule")
     assert result["topic_final"] == "N8"
     assert result["final_label"] == "0"
     assert result["urban_probability_score"] == 0.02
@@ -1670,7 +1694,7 @@ def test_anchor_guard_does_not_override_stage1_hard_negative_rural():
         "Rural regeneration and urban renewal policy in villages",
         "This paper studies rural renewal schemes and countryside development governance.",
     )
-    assert result["decision_source"] == "stage1_rule"
+    _assert_decision_source_contains(result, "stage1_rule")
     assert result["topic_final"] == "N9"
     assert result["final_label"] == "0"
     assert result["urban_probability_score"] == 0.02
@@ -1697,7 +1721,7 @@ def test_anchor_guard_does_not_trigger_on_urban_transformation_only(monkeypatch)
         "This paper studies governance discourse and policy narratives in cities.",
     )
     assert result["topic_final"] == "N3"
-    _assert_final_label_follows_binary_score(result)
+    _assert_stable_strategy_rejects_weak_binary_positive(result)
 
 
 def test_binary_recall_calibration_promotes_urban_context_floor():
@@ -1897,7 +1921,7 @@ def test_hybrid_classifier_preserves_review_rule_signal_for_nonunknown(monkeypat
         "This paper studies policy and governance narratives in urban contexts.",
     )
     assert result["topic_final"] == "N3"
-    _assert_final_label_follows_binary_score(result)
+    _assert_stable_strategy_rejects_weak_binary_positive(result)
     assert result["review_flag_raw"] == 1
     assert result["review_flag"] == 1
     assert "rule_unknown" in result["review_reason_raw"]

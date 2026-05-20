@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from typing import Dict
 
 import yaml
@@ -201,3 +202,25 @@ class PromptGenerator:
         if step_num == 1:
             return base + "Step 1: Urban renewal study? Output only 1 or 0."
         return base
+
+    def get_urban_semantic_evidence_prompt(
+        self,
+        title: str,
+        abstract: str,
+        metadata: Dict | None = None,
+        auxiliary_context: Dict | None = None,
+    ) -> str:
+        base = self.get_single_prompt(title, abstract, metadata=metadata)
+        context = json.dumps(auxiliary_context or {}, ensure_ascii=True)
+        return (
+            base
+            + "\n[SEMANTIC EVIDENCE TASK]\n"
+            "Decide whether this article's main subject is urban renewal. "
+            "Use the title and abstract as authoritative evidence; auxiliary signals are weak hints only. "
+            "A positive answer requires all three facts: an existing urban object, a renewal/regeneration/redevelopment action, "
+            "and that action being the article's main subject. Background mentions are not enough.\n"
+            f"[AUXILIARY SIGNALS] {context}\n"
+            "Return JSON only with these keys: research_object, object_is_existing_urban, existing_urban_object, "
+            "renewal_action_present, renewal_action, action_is_main_subject, policy_or_governance_context, "
+            "is_background_only, exclusion_risk, suggested_topic, label_hint, confidence, reason."
+        )

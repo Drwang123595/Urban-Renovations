@@ -32,9 +32,10 @@ from ..taxonomy.core import (
     topic_name_for_label,
     urban_flag_for_topic_label,
 )
+from ..strategy import build_llm_semantic_analyzer
 from ..strategy.decision import decide_stable_strategy
 from ..strategy.output import apply_decision_to_row
-from ..strategy.pipeline import build_evidence_bundle_from_row
+from ..strategy.pipeline import StableUrbanStrategy, build_evidence_bundle_from_row
 from .binary_scoring import (
     BINARY_HARD_NEGATIVE_REASONS,
     apply_binary_decision as _apply_binary_decision_helper,
@@ -277,6 +278,8 @@ class UrbanHybridClassifier:
                 hard_negative_result,
                 title=title,
                 abstract=abstract,
+                session_path=session_path,
+                audit_metadata=audit_metadata,
             )
 
         topic_prediction, bertopic_signal = self._stage2_attach_model_evidence(
@@ -314,6 +317,8 @@ class UrbanHybridClassifier:
             result,
             title=title,
             abstract=abstract,
+            session_path=session_path,
+            audit_metadata=audit_metadata,
         )
 
     def _apply_stable_strategy_overlay(
@@ -322,8 +327,10 @@ class UrbanHybridClassifier:
         *,
         title: str,
         abstract: str,
+        session_path: Optional[Path] = None,
+        audit_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Append the stable evidence-strategy decision without changing legacy final fields."""
+        """Apply the stable evidence-strategy decision as the final row contract."""
 
         evidence_row = {
             **result,
@@ -331,13 +338,27 @@ class UrbanHybridClassifier:
             Schema.ABSTRACT: abstract,
         }
         evidence = build_evidence_bundle_from_row(evidence_row)
+        analyzer = self._stable_strategy_llm_analyzer()
+        if analyzer is not None:
+            strategy = StableUrbanStrategy(llm_analyzer=analyzer)
+            return strategy.classify_row(
+                evidence_row,
+                mutate_final_fields=True,
+                session_path=session_path,
+                audit_metadata=audit_metadata,
+            )
         decision = decide_stable_strategy(evidence)
         return apply_decision_to_row(
             result,
             evidence,
             decision,
-            mutate_final_fields=False,
+            mutate_final_fields=True,
         )
+
+    def _stable_strategy_llm_analyzer(self):
+        if not self.llm_assist_enabled or not Config.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED:
+            return None
+        return build_llm_semantic_analyzer(self.llm_strategy, enabled=True)
 
     def _stage1_build_rule_baseline(
         self,
@@ -2634,6 +2655,14 @@ class UrbanHybridClassifier:
         session_path: Optional[Path],
         audit_metadata: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
+        if self._stable_strategy_owns_structured_llm_adjudication():
+            return {
+                "llm_attempted": 0,
+                "llm_used": 0,
+                "llm_failure_reason": "deferred_to_stable_strategy",
+                "llm_family_hint": "",
+                "llm_family_hint_reason": "",
+            }
         if not self.llm_assist_enabled:
             return {
                 "llm_attempted": 0,
@@ -2715,6 +2744,13 @@ class UrbanHybridClassifier:
         if llm_label not in {"0", "1"}:
             return "0", "invalid_label"
         return llm_label, ""
+
+    def _stable_strategy_owns_structured_llm_adjudication(self) -> bool:
+        return bool(
+            self.llm_assist_enabled
+            and Config.URBAN_HYBRID_ONLINE_LLM_HINTS_ENABLED
+            and getattr(self.llm_strategy, "supports_structured_urban_semantic_evidence", False)
+        )
 
     def _normalize_final_binary_label(
         self,

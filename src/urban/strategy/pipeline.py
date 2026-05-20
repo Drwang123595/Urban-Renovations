@@ -11,6 +11,7 @@ from ..taxonomy.core import UNKNOWN_TOPIC_GROUP, UNKNOWN_TOPIC_LABEL, topic_grou
 from .decision import StableUrbanDecisionEngine, decide_stable_strategy
 from .evidence import EvidenceBundle
 from .input import build_article_input
+from .llm_semantic import LLMSemanticAnalyzer
 from .output import apply_decision_to_row
 from .rule_evidence import RuleEvidenceExtractor
 from .topic_evidence import (
@@ -118,17 +119,19 @@ def build_evidence_bundle_from_row(row: Mapping[str, Any]) -> EvidenceBundle:
     )
 
 
-def apply_stable_strategy(frame: pd.DataFrame, *, mutate_final_fields: bool = False) -> pd.DataFrame:
+def apply_stable_strategy(
+    frame: pd.DataFrame,
+    *,
+    mutate_final_fields: bool = False,
+    llm_analyzer: Any | None = None,
+) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
     working = frame.copy()
+    strategy = StableUrbanStrategy(llm_analyzer=llm_analyzer)
     for idx, row in working.iterrows():
-        evidence = build_evidence_bundle_from_row(row)
-        decision = decide_stable_strategy(evidence)
-        updated = apply_decision_to_row(
+        updated = strategy.classify_row(
             row.to_dict(),
-            evidence,
-            decision,
             mutate_final_fields=mutate_final_fields,
         )
         for column, value in updated.items():
@@ -136,6 +139,10 @@ def apply_stable_strategy(frame: pd.DataFrame, *, mutate_final_fields: bool = Fa
                 working[column] = pd.Series([""] * len(working), index=working.index, dtype=object)
             working.at[idx, column] = value
     return working
+
+
+def build_llm_semantic_analyzer(llm_strategy: Any, *, enabled: bool = True) -> LLMSemanticAnalyzer:
+    return LLMSemanticAnalyzer(llm_strategy, enabled=enabled)
 
 
 def _normalize_binary_label(value: Any) -> str:

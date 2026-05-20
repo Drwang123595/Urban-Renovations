@@ -82,3 +82,20 @@ def test_step_prompt_marks_auxiliary_signals_as_weak_and_supports_title_abstract
     assert "[TITLE_ABSTRACT_ONLY MODE]" in prompt
     assert "[AUXILIARY SIGNALS - WEAK HINTS ONLY]" in prompt
     assert "must NOT override clear evidence from the TITLE and ABSTRACT" in prompt
+
+
+def test_semantic_evidence_prompt_requests_structured_json_triplet():
+    prompt_gen = PromptGenerator(shot_mode="few")
+    prompt = prompt_gen.get_urban_semantic_evidence_prompt(
+        "Property-led regeneration",
+        "The article studies regeneration policy for an inner-city district.",
+        metadata={},
+        auxiliary_context={"topic_candidate": "N3", "renewal_action_hits": ["regeneration"]},
+    )
+
+    assert "Return JSON only" in prompt
+    assert "object_is_existing_urban" in prompt
+    assert "renewal_action_present" in prompt
+    assert "action_is_main_subject" in prompt
+    assert "is_background_only" in prompt
+    assert "label_hint" in prompt

@@ -6,12 +6,13 @@ from typing import Any
 
 import pandas as pd
 
+from ...runtime.config import Schema
 from ...runtime.llm_client import DeepSeekClient
 from ..dynamic.binary_refinement import DynamicBinaryRefinementConfig, DynamicBinaryRefiner
 from ..dynamic.topic_discovery import DynamicTopicConfig, DynamicTopicDiscovery
 from ..hybrid.binary_finalizer import LlmBinaryFinalizer, workflow_enabled as llm_binary_v2_enabled
 from ..hybrid.binary_policy_v2 import UrbanBinaryPolicyV2
-from ..strategy import apply_stable_strategy
+from ..strategy import apply_stable_strategy, build_llm_semantic_analyzer
 
 
 def postprocess_urban_predictions(
@@ -25,10 +26,9 @@ def postprocess_urban_predictions(
     """Apply batch-only urban-renewal post-processing in contract order.
 
     Dynamic topic discovery only appends evidence columns. Dynamic binary
-    refinement may mutate final labels only when explicitly enabled. The
-    binary policy remains the production reconciliation layer for legacy
-    stability; the stable strategy layer appends one explainable decision
-    candidate by default and can mutate final fields only by explicit context.
+    refinement records candidate evidence but does not directly mutate final
+    labels. The binary policy appends conflict/risk evidence. The stable
+    strategy is the final decision layer for topic_final/final_label.
     """
 
     context = run_context if run_context is not None else {}
@@ -40,16 +40,17 @@ def postprocess_urban_predictions(
     else:
         _record_postprocess_layer(context, "dynamic_topic_evidence", "skipped")
 
-    # 2) Explicit label-mutation layer: may rewrite final_label / urban_flag.
+    # 2) Dynamic binary candidate layer: records evidence only. Final adoption
+    # is owned by stable strategy.
     if _dynamic_binary_refinement_enabled(context):
         enriched = _apply_dynamic_binary_refinement(enriched, context)
     else:
         _record_postprocess_layer(context, "dynamic_binary_refinement", "skipped")
 
-    # 3) Legacy binary reconciliation layer: preserves existing production
-    # final_label / urban_flag behavior unless callers disable it.
+    # 3) Legacy binary reconciliation layer used as evidence only; final
+    # labels are restored before stable strategy decides.
     if _binary_policy_v2_enabled(context):
-        enriched = _apply_binary_policy_v2(
+        enriched = _apply_binary_policy_v2_evidence_only(
             enriched,
             context=context,
             llm_client=llm_client,
@@ -72,9 +73,7 @@ def postprocess_urban_predictions(
     else:
         _record_postprocess_layer(context, "llm_binary_v2", "skipped")
 
-    # 5) Stable strategy layer: centralizes evidence -> decision explanation.
-    # By default it appends strategy_* fields only; explicit context may allow
-    # it to rewrite final_label / urban_flag / topic_final.
+    # 5) Stable strategy layer: the single final decision writer.
     if _stable_strategy_enabled(context):
         enriched = _apply_stable_strategy_layer(enriched, context)
     else:
@@ -162,7 +161,7 @@ def _stable_strategy_enabled(context: dict[str, Any]) -> bool:
 
 
 def _stable_strategy_mutates_final_fields(context: dict[str, Any]) -> bool:
-    raw = context.get("urban_stable_strategy_mutate_final_fields", False)
+    raw = context.get("urban_stable_strategy_mutate_final_fields", True)
     if isinstance(raw, bool):
         return raw
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
@@ -197,7 +196,7 @@ def _apply_dynamic_binary_refinement(frame: pd.DataFrame, context: dict[str, Any
 
     try:
         refiner = DynamicBinaryRefiner(DynamicBinaryRefinementConfig.from_context(context))
-        enriched = refiner.refine(frame, mutate_final_fields=True)
+        enriched = refiner.refine(frame, mutate_final_fields=False)
         _record_postprocess_layer(context, "dynamic_binary_refinement", "applied")
         return enriched
     except Exception as exc:
@@ -240,6 +239,53 @@ def _apply_binary_policy_v2(
         return frame
 
 
+def _apply_binary_policy_v2_evidence_only(
+    frame: pd.DataFrame,
+    *,
+    context: dict[str, Any],
+    llm_client: DeepSeekClient | None,
+    hybrid_llm_assist_enabled: bool,
+    urban_method: Any,
+) -> pd.DataFrame:
+    original_final_fields = _snapshot_final_fields(frame)
+    enriched = _apply_binary_policy_v2(
+        frame,
+        context=context,
+        llm_client=llm_client,
+        hybrid_llm_assist_enabled=False,
+        urban_method=urban_method,
+    )
+    return _restore_final_fields(enriched, original_final_fields)
+
+
+def _snapshot_final_fields(frame: pd.DataFrame) -> dict[str, pd.Series]:
+    columns = [
+        Schema.IS_URBAN_RENEWAL,
+        "urban_flag",
+        "final_label",
+        "topic_final",
+        "topic_label",
+        "topic_final_group",
+        "topic_group",
+        "topic_final_name",
+        "topic_name",
+        "legacy_topic_label",
+        "legacy_topic_group",
+        "legacy_topic_name",
+        "llm_used",
+        "llm_attempted",
+    ]
+    return {column: frame[column].copy() for column in columns if column in frame.columns}
+
+
+def _restore_final_fields(frame: pd.DataFrame, snapshot: dict[str, pd.Series]) -> pd.DataFrame:
+    restored = frame.copy()
+    for column, values in snapshot.items():
+        if column in restored.columns:
+            restored[column] = values
+    return restored
+
+
 def _apply_llm_binary_v2_finalizer(
     frame: pd.DataFrame,
     *,
@@ -271,9 +317,18 @@ def _apply_stable_strategy_layer(frame: pd.DataFrame, context: dict[str, Any]) -
         enriched = apply_stable_strategy(
             frame,
             mutate_final_fields=_stable_strategy_mutates_final_fields(context),
+            llm_analyzer=_stable_strategy_llm_analyzer(context),
         )
         _record_postprocess_layer(context, "stable_strategy", "applied")
         return enriched
     except Exception as exc:
         _handle_postprocess_failure(context, "stable_strategy", "Urban stable strategy failed", exc)
         return frame
+
+
+def _stable_strategy_llm_analyzer(context: dict[str, Any]):
+    strategy = context.get("urban_stable_strategy_llm_strategy")
+    enabled = _context_flag(context, "urban_stable_strategy_llm_enabled", bool(strategy))
+    if strategy is None or not enabled:
+        return None
+    return build_llm_semantic_analyzer(strategy, enabled=enabled)
