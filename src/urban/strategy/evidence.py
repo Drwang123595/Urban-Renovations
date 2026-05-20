@@ -159,6 +159,11 @@ class StableDecisionResult:
     review_reason: str = ""
     llm_semantic_evidence: str = ""
     evidence_conflict_type: str = ""
+    core_object_evidence: str = ""
+    renewal_action_evidence: str = ""
+    main_subject_evidence: str = ""
+    risk_evidence: str = ""
+    auxiliary_evidence: str = ""
 
 
 @dataclass(frozen=True)

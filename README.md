@@ -12,6 +12,10 @@ Current project contract as of 2026-04-27:
   - `topic_final` is the main output
   - `urban_flag` / `final_label` are written by the stable evidence strategy
   - topic space is `U1-U15 / N1-N10 / Unknown`
+- Urban-renewal decision definition:
+  - positive class requires an existing urban object, a renewal/redevelopment action, and action-as-main-subject
+  - hard exclusions protect rural revitalization, greenfield expansion, method-only/background usage, and terminology misuse
+  - auxiliary model signals may support evidence, but they do not redefine what counts as urban renewal
 - BERTopic is auxiliary only:
   - dynamic topic discovery
   - `Unknown` review support
@@ -22,11 +26,11 @@ Current project contract as of 2026-04-27:
   - positive evidence requires an existing urban object, renewal action, and action-as-main-subject
   - may support the final decision only when the structured semantic triplet is satisfied
   - every used LLM adjudication must write `llm_attempted`, `llm_used`, and `llm_semantic_evidence`
-- Stable decision chain is multi-stage (audited via `decision_source`):
-  - `stage1_rule`, `rule_model_fusion`
-  - `family gate` (offline gate model, participates in family decisions)
-  - `anchor_guard`, `uncertain_nonurban_guard`, `open_set_recovery`
-  - `unknown_hint_resolution`, `unknown_review`
+- Stable decision chain is a four-step rule, audited through strategy fields:
+  - extract core object, renewal action, main-subject, and risk evidence
+  - reject hard exclusions before any model promotion
+  - call LLM only for boundary semantics when rule/model evidence is unclear
+  - write final labels once through the stable strategy output builder
 
 ## Experiment governance
 

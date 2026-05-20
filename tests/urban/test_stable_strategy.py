@@ -246,9 +246,67 @@ def test_stable_strategy_accepts_strong_positive_with_action_and_existing_object
 
     assert decision.final_label == "1"
     assert decision.status == StableDecisionStatus.ACCEPTED_POSITIVE
-    assert "renewal_action_and_existing_urban_object" in decision.reason
+    assert decision.reason == "core_object_action_main_subject"
     assert "renewal_action" in decision.positive_evidence
     assert "existing_urban_object" in decision.positive_evidence
+
+
+def test_stable_strategy_outputs_four_step_evidence_fields_when_mutating():
+    frame = pd.DataFrame(
+        [
+            {
+                Schema.TITLE: "Adaptive reuse of heritage buildings in old districts",
+                Schema.ABSTRACT: (
+                    "The study evaluates adaptive reuse and rehabilitation of existing "
+                    "heritage buildings in old urban districts."
+                ),
+                Schema.IS_URBAN_RENEWAL: "0",
+                "final_label": "0",
+                "urban_flag": "0",
+                "topic_final": "U5",
+                "topic_final_group": "urban",
+                "family_probability_urban": 0.82,
+                "urban_probability_score": 0.78,
+                "binary_decision_threshold": 0.45,
+            }
+        ]
+    )
+
+    stable = apply_stable_strategy(frame, mutate_final_fields=True)
+
+    assert stable.loc[0, "core_object_evidence"]
+    assert stable.loc[0, "renewal_action_evidence"]
+    assert stable.loc[0, "main_subject_evidence"] == "core_object_and_action_in_title_or_abstract"
+    assert stable.loc[0, "risk_evidence"] == "none"
+    assert "topic=U5" in stable.loc[0, "auxiliary_evidence"]
+    assert stable.loc[0, "strategy_reason"] == "core_object_action_main_subject"
+
+
+def test_stable_strategy_rejects_method_background_even_with_object_and_action_words():
+    row = pd.Series(
+        {
+            Schema.TITLE: "Machine learning framework for urban renewal datasets",
+            Schema.ABSTRACT: (
+                "This method paper develops a graph neural network and uses old district "
+                "redevelopment records only as a benchmark dataset."
+            ),
+            Schema.IS_URBAN_RENEWAL: "1",
+            "final_label": "1",
+            "urban_flag": "1",
+            "topic_final": "U9",
+            "topic_final_group": "urban",
+            "family_probability_urban": 0.82,
+            "urban_probability_score": 0.78,
+            "binary_decision_threshold": 0.45,
+        }
+    )
+
+    decision = decide_stable_strategy(build_evidence_bundle_from_row(row))
+
+    assert decision.final_label == "0"
+    assert decision.status == StableDecisionStatus.CONFLICT_REVIEW
+    assert "background_or_method_only" in decision.reason
+    assert "main_subject=background_or_method_only" in decision.negative_evidence
 
 
 def test_stable_strategy_uses_structured_llm_evidence_for_boundary_positive():
@@ -385,6 +443,11 @@ def test_urban_output_row_contract_includes_stable_strategy_defaults_and_compat_
     assert row["strategy_label"] == ""
     assert row["strategy_status"] == ""
     assert row["strategy_reason"] == ""
+    assert row["core_object_evidence"] == ""
+    assert row["renewal_action_evidence"] == ""
+    assert row["main_subject_evidence"] == ""
+    assert row["risk_evidence"] == ""
+    assert row["auxiliary_evidence"] == ""
     assert row["positive_evidence"] == ""
     assert row["negative_evidence"] == ""
     assert row["strategy_v3_label"] == ""

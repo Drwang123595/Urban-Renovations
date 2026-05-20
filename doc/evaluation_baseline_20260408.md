@@ -81,6 +81,15 @@ Consolidated historical copies live under `Data/output/<dataset_id>/legacy_outpu
 - Stable run summary (auditable runtime + family gate metadata):
   - `Data/output/Urban Renovation V2.0_cleaned_article_sample_1000_local_labeled_v2_20260407/runs/stable_release/20260427_deepseek_v4_flash_stable/Stable_Run_Summary.json`
 
+Stable urban-renewal semantics are interpreted through a four-step rule:
+
+1. Identify an existing urban object, such as an old district, existing community, brownfield, heritage building, or public space.
+2. Identify a renewal action, such as regeneration, redevelopment, rehabilitation, adaptive reuse, upgrading, or brownfield reuse.
+3. Confirm that the action is the article's main subject rather than a background dataset, example, or method benchmark.
+4. Apply hard exclusions before promotion: rural revitalization, greenfield expansion, method-only/background usage, and terminology misuse remain negative unless explicitly resolved by audited boundary evidence.
+
+Auxiliary topic, family, binary, BERTopic, and dynamic-topic signals support these four evidence questions. They do not independently define the positive class. LLM use is limited to boundary semantic adjudication and must write `llm_attempted`, `llm_used`, and `llm_semantic_evidence` when used.
+
 ## Locked metrics
 
 Urban Renewal metrics for the stable release:
