@@ -63,6 +63,7 @@ evaluate_1000_log.txt
 /tmp/
 /Data/
 /data/
+/models/huggingface_cache/
 /测试数据/
 *.prompt_manifest.json
 

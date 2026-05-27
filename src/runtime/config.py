@@ -107,7 +107,8 @@ class Config:
     TEMPERATURE = 1.0
     MAX_TOKENS = int(os.environ.get("MAX_TOKENS", 500))
     TIMEOUT = int(os.environ.get("TIMEOUT", 60))
-    MAX_WORKERS = int(os.environ.get("MAX_WORKERS", 1)) # Default 1 for safety
+    MAX_WORKERS = int(os.environ.get("MAX_WORKERS", 500))
+    LLM_STRICT_JSON_OUTPUT = _env_flag("LLM_STRICT_JSON_OUTPUT", True)
     PERSIST_FULL_SESSIONS = _env_flag("PERSIST_FULL_SESSIONS", False)
     AUDIT_FIELD_MAX_CHARS = int(os.environ.get("AUDIT_FIELD_MAX_CHARS", 240))
     SESSION_MESSAGE_MAX_CHARS = int(os.environ.get("SESSION_MESSAGE_MAX_CHARS", 1200))
@@ -229,6 +230,10 @@ class Config:
             
             # Update system settings
             cls.MAX_WORKERS = int(os.environ.get("MAX_WORKERS", cls.MAX_WORKERS))
+            cls.LLM_STRICT_JSON_OUTPUT = _env_flag(
+                "LLM_STRICT_JSON_OUTPUT",
+                cls.LLM_STRICT_JSON_OUTPUT,
+            )
             cls.MAX_TOKENS = int(os.environ.get("MAX_TOKENS", cls.MAX_TOKENS))
             cls.TIMEOUT = int(os.environ.get("TIMEOUT", cls.TIMEOUT))
             cls.PERSIST_FULL_SESSIONS = _env_flag("PERSIST_FULL_SESSIONS", cls.PERSIST_FULL_SESSIONS)

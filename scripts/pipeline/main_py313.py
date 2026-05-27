@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -16,7 +17,9 @@ from src.prompting.manifest import (
 )
 from src.prompting.strategy_registry import PromptStrategyDefinition, PromptStrategyRegistry
 from src.runtime.config import Config
+from src.runtime.llm_client import LLMQuotaExceededError
 from src.runtime.project_paths import resolve_managed_output_path, resolve_train_input_path
+from src.runtime.resume import default_checkpoint_path, summary_path_for_checkpoint
 from src.tasks.task_router import TaskRouter, TaskType, UrbanMethod
 from src.urban.hybrid.binary_finalizer import summarize_llm_binary_v2
 
@@ -507,8 +510,9 @@ def build_run_context(
     dynamic_binary_refinement_allow_flip: bool,
     urban_flow_audit_enabled: bool,
     urban_binary_workflow_version: str,
+    resume_checkpoint: str | None = None,
 ) -> dict:
-    return {
+    context = {
         "experiment_track": experiment_track,
         "dataset_id": dataset_id,
         "truth_file": truth_file,
@@ -527,6 +531,9 @@ def build_run_context(
         "urban_flow_audit_enabled": bool(urban_flow_audit_enabled),
         "urban_binary_workflow_version": str(urban_binary_workflow_version or "stable_v1"),
     }
+    if resume_checkpoint:
+        context["resume_checkpoint"] = str(resume_checkpoint)
+    return context
 
 
 def _manifest_context_for_output(run_context: dict, pred_scope: str) -> dict:
@@ -813,6 +820,15 @@ def print_run_configuration(
         print(f"Strategy Proof: {render_strategy_proof(args.spatial_shot or args.shot or spatial_shot, spatial_definition)}")
     print(f"Task: {args.task.value}")
     print(f"Output: {args.output or 'AUTO'}")
+    print(f"Resume Checkpoint: {_checkpoint_display_for_args(args)}")
+
+
+def _checkpoint_display_for_args(args) -> str:
+    if args.resume_checkpoint:
+        return str(args.resume_checkpoint)
+    if args.output:
+        return str(default_checkpoint_path(args.output))
+    return "AUTO (<output>.checkpoint.jsonl)"
 
 
 def run_selected_task(router: TaskRouter, args, run_context: dict) -> dict:
@@ -866,6 +882,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, help="Limit number of papers to process")
     parser.add_argument("--input", help="Input Excel file path")
     parser.add_argument("--output", help="Output Excel file path")
+    parser.add_argument(
+        "--resume-checkpoint",
+        default=None,
+        help="Optional JSONL checkpoint path for resumable API-backed runs (default: <output>.checkpoint.jsonl)",
+    )
     parser.add_argument(
         "--experiment-track",
         choices=list(Config.EXPERIMENT_TRACKS),
@@ -1166,6 +1187,7 @@ def build_execution_context(args, input_path: Path):
         dynamic_binary_refinement_allow_flip=bool(dynamic_binary_allow_flip),
         urban_flow_audit_enabled=bool(urban_flow_audit_enabled),
         urban_binary_workflow_version=args.urban_binary_workflow,
+        resume_checkpoint=args.resume_checkpoint,
     )
     return dataset_id, truth_file, session_policy, run_context
 
@@ -1173,10 +1195,57 @@ def build_execution_context(args, input_path: Path):
 def finalize_output_args(args) -> None:
     if args.output:
         args.output = str(resolve_managed_output_path(args.output, project_root=Config.DATA_DIR.parent))
+    if args.resume_checkpoint:
+        args.resume_checkpoint = str(Path(args.resume_checkpoint))
 
     if args.strategy is not None:
         print("[WARN] --strategy is deprecated. Use --task instead.")
         print("[WARN] Ignoring --strategy and using --task mode.")
+
+
+def _checkpoint_path_for_failure(args, run_context: dict) -> str:
+    path = run_context.get("_last_resume_checkpoint") or run_context.get("resume_checkpoint")
+    if path:
+        return str(path)
+    if args.output:
+        return str(default_checkpoint_path(args.output))
+    return ""
+
+
+def _completed_rows_for_failure(checkpoint_path: str, run_context: dict) -> int | None:
+    raw_count = run_context.get("_last_resume_completed_rows")
+    if raw_count not in (None, ""):
+        try:
+            return int(raw_count)
+        except (TypeError, ValueError):
+            pass
+    if not checkpoint_path:
+        return None
+    path = Path(checkpoint_path)
+    summary_path = summary_path_for_checkpoint(path)
+    if summary_path.exists():
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            for key in ("completed_rows", "completed"):
+                value = payload.get(key)
+                if value not in (None, ""):
+                    return int(value)
+        except Exception:
+            pass
+    if path.exists():
+        completed = 0
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("status") == "completed":
+                    completed += 1
+            return completed
+        except Exception:
+            return None
+    return None
 
 
 def build_task_router(args, urban_definition, spatial_definition) -> TaskRouter:
@@ -1254,6 +1323,18 @@ def main(argv: list[str] | None = None) -> int:
             results=result,
             run_context=run_context,
         )
+    except LLMQuotaExceededError as exc:
+        checkpoint_path = _checkpoint_path_for_failure(args, run_context)
+        completed_rows = _completed_rows_for_failure(checkpoint_path, run_context)
+        completed_text = str(completed_rows) if completed_rows is not None else "unknown"
+        checkpoint_text = checkpoint_path or "see task warning above"
+        code_text = exc.code or exc.reason or str(exc.status_code or "")
+        print(
+            "Error: LLM quota exhausted"
+            f"{f' ({code_text})' if code_text else ''}. "
+            f"已完成 {completed_text} 行；checkpoint={checkpoint_text}；下一次使用同一命令可恢复。"
+        )
+        return 2
     except Exception as exc:
         print(f"Error: run failed: {exc}")
         raise

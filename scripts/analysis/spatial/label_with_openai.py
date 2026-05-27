@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.runtime.config import Schema
+from src.runtime.llm_client import LLMQuotaExceededError
 
 
 DEFAULT_INPUT = PROJECT_ROOT / "Data" / "spatial_sample_2000_20260428" / "input" / "spatial_sample_2000_seed20260428.xlsx"
@@ -26,6 +27,14 @@ DEFAULT_ANALYSIS_DIR = PROJECT_ROOT / "Data" / "spatial_sample_2000_20260428" / 
 DEFAULT_OUTPUT = DEFAULT_ANALYSIS_DIR / "gpt_blind_labels_2000_20260428.xlsx"
 DEFAULT_CHECKPOINT = DEFAULT_ANALYSIS_DIR / "gpt_blind_labels_2000_20260428.jsonl"
 DEFAULT_MODEL = "gpt-5.4-mini"
+QUOTA_ERROR_TOKENS = (
+    "DAILY_LIMIT_EXCEEDED",
+    "USAGE_LIMIT_EXCEEDED",
+    "QUOTA_EXCEEDED",
+    "INSUFFICIENT_QUOTA",
+    "DAILY USAGE LIMIT EXCEEDED",
+    "TOO MANY REQUESTS",
+)
 
 SCALE_LEVELS = {
     "1": "1. Global Scale",
@@ -216,6 +225,51 @@ def make_client(api_key: str, base_url: Optional[str]) -> OpenAI:
     return OpenAI(**kwargs)
 
 
+def _error_status_code(error: Exception) -> Optional[int]:
+    status = getattr(error, "status_code", None)
+    if status is None:
+        response = getattr(error, "response", None)
+        status = getattr(response, "status_code", None)
+    try:
+        return int(status) if status is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _error_payload_text(error: Exception) -> str:
+    parts = [str(error)]
+    body = getattr(error, "body", None)
+    if body:
+        try:
+            parts.append(json.dumps(body, ensure_ascii=False))
+        except TypeError:
+            parts.append(str(body))
+    response = getattr(error, "response", None)
+    if response is not None:
+        text = getattr(response, "text", "")
+        if text:
+            parts.append(str(text))
+    return " ".join(part for part in parts if part)
+
+
+def raise_if_quota_exceeded(error: Exception) -> None:
+    status_code = _error_status_code(error)
+    payload = _error_payload_text(error)
+    upper = payload.upper()
+    if status_code != 429 or not any(token in upper for token in QUOTA_ERROR_TOKENS):
+        return
+    code = "USAGE_LIMIT_EXCEEDED" if "USAGE_LIMIT_EXCEEDED" in upper else "RATE_LIMIT_429"
+    reason = "DAILY_LIMIT_EXCEEDED" if "DAILY_LIMIT_EXCEEDED" in upper else "RATE_LIMIT_429"
+    if "TOO MANY REQUESTS" in upper:
+        reason = "TOO_MANY_REQUESTS"
+    raise LLMQuotaExceededError(
+        f"OpenAI quota exhausted: status={status_code} code={code} reason={reason}",
+        status_code=status_code,
+        code=code,
+        reason=reason,
+    ) from error
+
+
 def call_openai_label(
     client: OpenAI,
     model: str,
@@ -223,12 +277,16 @@ def call_openai_label(
     abstract: str,
     retry_reason: str = "",
 ) -> tuple[str, Dict[str, Any], str, str]:
-    response = client.chat.completions.create(
-        model=model,
-        messages=build_messages(title, abstract, retry_reason=retry_reason),
-        temperature=0.0,
-        max_tokens=500,
-    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=build_messages(title, abstract, retry_reason=retry_reason),
+            temperature=0.0,
+            max_tokens=500,
+        )
+    except Exception as error:
+        raise_if_quota_exceeded(error)
+        raise
     raw = response.choices[0].message.content or ""
     parsed = parse_label_json(raw)
     status, error = validate_label(parsed)
@@ -314,6 +372,25 @@ def label_dataframe(
                 if status == "valid":
                     break
                 retry_reason = error
+            except LLMQuotaExceededError as error:
+                final_record = {
+                    "row_index": row_index,
+                    "source_row_0based": int(source_row) if pd.notna(source_row) else row_index,
+                    Schema.TITLE: title,
+                    Schema.ABSTRACT: abstract,
+                    "gpt_is_spatial": "",
+                    "gpt_spatial_scale_level": "",
+                    "gpt_specific_study_area": "",
+                    "label_status": "quota_exhausted",
+                    "label_error": f"{type(error).__name__}: {error}",
+                    "label_model": model,
+                    "label_attempts": attempt + 1,
+                    "raw_response": "",
+                }
+                append_checkpoint(checkpoint_path, final_record)
+                checkpoint[row_index] = final_record
+                results.append(final_record)
+                raise
             except Exception as error:  # noqa: BLE001 - keep batch resilient and auditable.
                 final_record = {
                     "row_index": row_index,
@@ -371,7 +448,11 @@ def main() -> int:
     if not model.startswith("gpt-"):
         raise RuntimeError(f"Model must start with gpt-, got: {model}")
     client = make_client(api_key, base_url)
-    probe_openai(client, model)
+    try:
+        probe_openai(client, model)
+    except LLMQuotaExceededError as exc:
+        print(f"[WARN] OpenAI quota exhausted during probe: {exc}")
+        return 2
     print(f"[INFO] OpenAI GPT probe passed with model={model}")
     if args.probe_only:
         return 0
@@ -384,15 +465,30 @@ def main() -> int:
     if len(df) != 2000 and args.limit is None:
         raise RuntimeError(f"Expected 2000 input rows for full run, got {len(df)}")
 
-    labels = label_dataframe(
-        df,
-        client=client,
-        model=model,
-        checkpoint_path=args.checkpoint,
-        start=args.start,
-        limit=args.limit,
-        max_retries=args.max_retries,
-    )
+    try:
+        labels = label_dataframe(
+            df,
+            client=client,
+            model=model,
+            checkpoint_path=args.checkpoint,
+            start=args.start,
+            limit=args.limit,
+            max_retries=args.max_retries,
+        )
+    except LLMQuotaExceededError as exc:
+        checkpoint = load_checkpoint(args.checkpoint)
+        labels = pd.DataFrame(checkpoint.values())
+        if not labels.empty and "row_index" in labels.columns:
+            labels = labels.sort_values("row_index").reset_index(drop=True)
+        if not labels.empty:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            labels.to_excel(args.output, index=False, engine="openpyxl")
+        valid_count = int((labels.get("label_status", pd.Series(dtype=object)) == "valid").sum()) if not labels.empty else 0
+        print(
+            "[WARN] OpenAI quota exhausted; saved current checkpoint and partial labels. "
+            f"valid_rows={valid_count} checkpoint={args.checkpoint} output={args.output} error={exc}"
+        )
+        return 2
     args.output.parent.mkdir(parents=True, exist_ok=True)
     labels.to_excel(args.output, index=False, engine="openpyxl")
     status_counts = labels["label_status"].value_counts(dropna=False).to_dict()

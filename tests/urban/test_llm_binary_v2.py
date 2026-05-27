@@ -127,6 +127,26 @@ def test_adjudicator_parses_structured_json_and_marks_valid_positive():
     assert "old neighborhood redevelopment" in result.evidence
 
 
+def test_adjudicator_prompt_contains_strict_json_schema_example():
+    client = _FakeLLMClient(
+        '{"label":"0","confidence":0.91,"decision_type":"background_only",'
+        '"object_is_existing_urban":false,"renewal_action_present":false,'
+        '"action_is_main_subject":false,"background_only":true,'
+        '"exclusion_risk":"background","evidence":["municipal policy"],'
+        '"reason":"background only"}'
+    )
+
+    LlmAdjudicator(client).adjudicate(pd.Series(_row()))
+    system_prompt = client.messages[0][0]["content"]
+
+    assert "JSON object" in system_prompt
+    assert "json" in system_prompt.lower()
+    assert '"label": "0 or 1"' in system_prompt
+    assert '"confidence": 0.0' in system_prompt
+    assert '"decision_type": "core_renewal"' in system_prompt
+    assert "Return no Markdown" in system_prompt
+
+
 def test_adjudicator_invalid_json_is_safe_fallback():
     result = LlmAdjudicator(_FakeLLMClient("not json")).adjudicate(pd.Series(_row()))
 

@@ -469,6 +469,77 @@ def test_llm_client_uses_responses_endpoint_when_base_url_targets_responses(monk
     assert captured["instructions"] == "system rules"
     assert captured["input"] == [{"role": "user", "content": "Reply with OK only."}]
     assert captured["max_output_tokens"] == 123
+    assert "response_format" not in captured
+
+
+def test_default_max_workers_is_500_for_deepseek_concurrency():
+    assert Config.MAX_WORKERS == 500
+
+
+def test_max_workers_and_strict_json_can_be_overridden_from_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAX_WORKERS", raising=False)
+    monkeypatch.delenv("LLM_STRICT_JSON_OUTPUT", raising=False)
+    monkeypatch.setattr(Config, "MAX_WORKERS", 500)
+    monkeypatch.setattr(Config, "LLM_STRICT_JSON_OUTPUT", True, raising=False)
+    env_path = tmp_path / ".env"
+    env_path.write_text("MAX_WORKERS=32\nLLM_STRICT_JSON_OUTPUT=false\n", encoding="utf-8")
+
+    Config.load_env(env_path)
+
+    assert Config.MAX_WORKERS == 32
+    assert Config.LLM_STRICT_JSON_OUTPUT is False
+
+
+def test_llm_client_chat_completions_uses_strict_json_response_format(monkeypatch):
+    monkeypatch.setattr(Config, "MAX_TOKENS", 123)
+    monkeypatch.setattr(Config, "LLM_STRICT_JSON_OUTPUT", True, raising=False)
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))])
+
+    client = DeepSeekClient(
+        api_key="sk-test-secret",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-v4-flash",
+    )
+    client.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)))
+
+    result = client.chat_completion([{"role": "user", "content": "Return json object."}], max_retries=1)
+
+    assert result == '{"ok": true}'
+    assert captured["response_format"] == {"type": "json_object"}
+
+
+def test_llm_client_can_disable_strict_json_response_format(monkeypatch):
+    monkeypatch.setattr(Config, "LLM_STRICT_JSON_OUTPUT", False, raising=False)
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="OK"))])
+
+    client = DeepSeekClient(
+        api_key="sk-test-secret",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-v4-flash",
+    )
+    client.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)))
+
+    result = client.chat_completion([{"role": "user", "content": "Reply OK"}], max_retries=1)
+
+    assert result == "OK"
+    assert "response_format" not in captured
+
+
+def test_spatial_prompt_includes_strict_json_object_schema():
+    prompt = PromptGenerator(shot_mode="zero", default_theme="spatial").get_spatial_system_prompt()
+
+    assert "JSON object" in prompt
+    assert "valid JSON object" in prompt
+    assert '"Is_Spatial_Research"' in prompt
+    assert '"Specific_Study_Area"' in prompt
 
 
 def test_llm_client_retries_empty_responses_text(monkeypatch, capsys):

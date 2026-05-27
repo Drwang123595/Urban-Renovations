@@ -293,13 +293,16 @@ class DeepSeekClient:
         return text
 
     def _chat_completions_completion(self, messages: List[Dict[str, str]], temperature: float) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=Config.MAX_TOKENS,
-            stream=False
-        )
+        kwargs: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": Config.MAX_TOKENS,
+            "stream": False,
+        }
+        if Config.LLM_STRICT_JSON_OUTPUT:
+            kwargs["response_format"] = {"type": "json_object"}
+        response = self.client.chat.completions.create(**kwargs)
         text = response.choices[0].message.content
         text = "" if text is None else str(text).strip()
         if not text:
